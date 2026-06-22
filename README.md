@@ -122,8 +122,8 @@ Project Work/
 ## **Setup Instructions**
 ### **1. Clone Repository**
 ```bash
-git clone https://github.com/kmohammedsu/dsp.git
-cd dsp
+git clone https://github.com/kmohammedsu/seattle-parking-weather-analysis.git
+cd seattle-parking-weather-analysis
 ```
 
 ### **2. Create Virtual Environment & Install Dependencies**

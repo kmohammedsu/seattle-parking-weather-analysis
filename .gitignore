@@ -1,1 +1,34 @@
-data/merged_parking_weather_data.csv
+# Data files — never commit raw data
+data/*.csv
+data/*.json
+data/*.pkl
+
+# Model files — stored on Hugging Face Hub
+models/*.pkl
+models/models/*.pkl
+
+# Pipeline state
+last_run.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.Python
+venv/
+env/
+.env
+*.egg-info/
+dist/
+build/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
