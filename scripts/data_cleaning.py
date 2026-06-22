@@ -1,54 +1,64 @@
 import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
 import os
+from pathlib import Path
 
-# File Path
-file_path = r"data/Annual_Parking_Study_Data_20250220.csv"
-output_file_path = os.path.join(os.path.dirname(file_path), "Cleaned_" + os.path.basename(file_path))
+ROOT = Path(__file__).resolve().parent.parent
+RAW_FILE = ROOT / "data" / "Annual_Parking_Study_Data_20250220.csv"
+OUTPUT_FILE = ROOT / "data" / "Cleaned_Annual_Parking_Study_Data_20250220.csv"
 
-# Load Data
-parking_df = pd.read_csv(file_path, dtype=str, low_memory=False)
+NUMERIC_COLS = ["Parking_Spaces", "Total_Vehicle_Count", "Dp_Count", "Rpz_Count"]
+CATEGORICAL_COLS = ["Study_Area", "Sub_Area"]
+SPARSE_COLS = ["TG_Car2Go", "BMW_DN", "Lime", "Idling", "Field Notes", "Peak Hour_SDOT"]
 
-# Step 1: Data Cleaning by Convert Numeric Columns (Handle Errors)
-numeric_cols = ["Parking_Spaces", "Total_Vehicle_Count", "Dp_Count", "Rpz_Count"]
-for col in numeric_cols:
-    parking_df[col] = pd.to_numeric(parking_df[col], errors="coerce")
 
-# Convert DateTime Columns Properly (Fix: Handle Different Date Formats)
-date_cols = ["Date Time", "Time Stamp"]
-for col in date_cols:
-    if col in parking_df.columns:
-        parking_df[col] = pd.to_datetime(parking_df[col], errors="coerce", format="%m/%d/%Y %H:%M")
+def load_raw(path: Path) -> pd.DataFrame:
+    return pd.read_csv(path, dtype=str, low_memory=False)
 
-# Convert Categorical Columns (Fix: Replace NaN with 'Unknown' only if category exists)
-categorical_cols = ["Study_Area", "Sub_Area"]
-for col in categorical_cols:
-    if col in parking_df.columns:
-        parking_df[col] = parking_df[col].astype("category")
-        parking_df[col] = parking_df[col].cat.add_categories(["Unknown"])
-        parking_df[col].fillna("Unknown", inplace=True)
 
-# Drop rows where DateTime is missing **before** numeric filtering
-parking_df.dropna(subset=["Date Time"], inplace=True)
+def clean(df: pd.DataFrame) -> pd.DataFrame:
+    # Parse datetime
+    df["Date Time"] = pd.to_datetime(df["Date Time"], errors="coerce", format="%m/%d/%Y %H:%M")
+    df = df.dropna(subset=["Date Time"])
 
-# Fill Missing Numeric Values with Median **before filtering negative values**
-parking_df[numeric_cols] = parking_df[numeric_cols].fillna(parking_df[numeric_cols].median())
+    # Drop sparse columns not used in analysis
+    df = df.drop(columns=[c for c in SPARSE_COLS if c in df.columns])
 
-# Ensure Total_Vehicle_Count NaNs are filled with 0 before filtering
-parking_df.loc[:, "Total_Vehicle_Count"] = parking_df["Total_Vehicle_Count"].fillna(0)
+    # Numeric coercion
+    for col in NUMERIC_COLS:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
 
-# Drop rows where all numeric values are missing
-to_drop = parking_df[numeric_cols].isna().all(axis=1)
-parking_df = parking_df[~to_drop]
+    # Fill missing numerics with median
+    df[NUMERIC_COLS] = df[NUMERIC_COLS].fillna(df[NUMERIC_COLS].median())
 
-# Remove Negative Values in Total_Vehicle_Count
-parking_df = parking_df[parking_df["Total_Vehicle_Count"] >= 0]
+    # Remove negative vehicle counts
+    df = df[df["Total_Vehicle_Count"] >= 0]
 
-# Set DateTime column as index for time-series analysis
-parking_df.set_index("Date Time", inplace=True)
+    # Normalize categorical columns — strip whitespace, title case, fill unknown
+    for col in CATEGORICAL_COLS:
+        if col in df.columns:
+            df[col] = df[col].astype(str).str.strip().str.title().replace("Nan", "Unknown")
 
-# Save Cleaned Data to CSV in the Same Folder
-parking_df.to_csv(output_file_path)
+    # Normalize Study_Area casing inconsistencies (e.g. "Ballard locks summer" variants)
+    if "Study_Area" in df.columns:
+        df["Study_Area"] = df["Study_Area"].str.strip().str.title()
 
-print(f"Cleaned data saved to: {output_file_path}")
+    df = df.set_index("Date Time")
+    return df
+
+
+def run():
+    print(f"Loading {RAW_FILE.name}...")
+    df = load_raw(RAW_FILE)
+    print(f"  Raw shape: {df.shape}")
+
+    df = clean(df)
+    print(f"  Clean shape: {df.shape}")
+
+    df.to_csv(OUTPUT_FILE)
+    print(f"Saved to {OUTPUT_FILE}")
+    return df
+
+
+if __name__ == "__main__":
+    run()
