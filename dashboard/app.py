@@ -820,12 +820,13 @@ elif page == "🗺️ Geo Map":
         st.error("No data to display.")
         st.stop()
 
+    # Coordinates are the actual paid-meter district centroids in Seattle
     REGION_COORDS = {
-        "Downtown Seattle":    (47.6062, -122.3321),
-        "Capitol Hill":        (47.6253, -122.3222),
-        "South Lake Union":    (47.6205, -122.3367),
-        "Ballard":             (47.6677, -122.3833),
-        "Industrial District": (47.5785, -122.3220),
+        "Downtown Seattle":    (47.6080, -122.3360),  # 3rd Ave & Pike core
+        "Capitol Hill":        (47.6230, -122.3198),  # Broadway & Pike
+        "South Lake Union":    (47.6270, -122.3367),  # Westlake & Thomas
+        "Ballard":             (47.6683, -122.3843),  # NW Market & 22nd Ave NW
+        "Industrial District": (47.5804, -122.3292),  # 4th Ave S & Lander (SoDo)
     }
 
     region_occ = (
@@ -862,12 +863,15 @@ elif page == "🗺️ Geo Map":
         else:
             return "rgba(74,144,217,0.4)"
 
+    all_coords = list(REGION_COORDS.values())
+    sw = [min(c[0] for c in all_coords) - 0.01, min(c[1] for c in all_coords) - 0.01]
+    ne = [max(c[0] for c in all_coords) + 0.01, max(c[1] for c in all_coords) + 0.01]
+
     m = folium.Map(
-        location=[47.620, -122.340],
-        zoom_start=12,
         tiles="CartoDB dark_matter",
         zoom_control=True,
     )
+    m.fit_bounds([sw, ne])
 
     for _, row in region_occ.iterrows():
         coords = REGION_COORDS.get(row["region"], (47.61, -122.33))
