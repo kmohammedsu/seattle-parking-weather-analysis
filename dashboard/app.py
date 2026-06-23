@@ -344,9 +344,8 @@ if page == "📊 Overview":
                        annotation_text="70% lower", annotation_position="bottom right")
         fig2.update_layout(
             title="Daily Average Occupancy (last 30 days)",
-            yaxis=dict(tickformat=".0%", range=[0, 1]),
             height=380,
-            **PLOTLY_THEME,
+            **{**PLOTLY_THEME, "yaxis": dict(tickformat=".0%", range=[0, 1])},
         )
         st.plotly_chart(fig2, use_container_width=True)
 
