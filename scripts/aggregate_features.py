@@ -14,29 +14,74 @@ CLOSURES_FILE = DATA_DIR / "seattle_road_closures.csv"
 HOLIDAYS_FILE = DATA_DIR / "seattle_holidays.csv"
 OUTPUT_FILE   = DATA_DIR / "features.csv"
 
-BLOCKFACE_REGION = {
-    "DOWNTOWN":       "Downtown Seattle",
-    "CAPITOL HILL":   "Capitol Hill",
-    "SOUTH LAKE":     "South Lake Union",
-    "BALLARD":        "Ballard",
-    "SODO":           "Industrial District",
-    "PIONEER":        "Downtown Seattle",
-    "FIRST HILL":     "Capitol Hill",
-    "UPTOWN":         "Downtown Seattle",
-}
-
 VENUE_REGION = {
     "Lumen Field":          "Industrial District",
     "T-Mobile Park":        "Industrial District",
-    "Climate Pledge Arena": "Downtown Seattle",
+    "Climate Pledge Arena": "South Lake Union",
 }
+
+# Street-pattern rules ordered most-specific first; first match wins.
+# Blockface strings look like "10TH AVE BETWEEN E MADISON ST AND E SENECA ST"
+BLOCKFACE_RULES = [
+    # Ballard: NW-suffix streets and named Ballard roads
+    (" NW ",         "Ballard"),
+    (" NW B",        "Ballard"),   # "NW BETWEEN"
+    ("BALLARD AVE",  "Ballard"),
+    ("LEARY AVE",    "Ballard"),
+    ("NW MARKET",    "Ballard"),
+    # Industrial District / SoDo: S-suffix streets south of downtown
+    (" AVE S ",      "Industrial District"),
+    (" AVE S B",     "Industrial District"),
+    ("1ST AVE S",    "Industrial District"),
+    ("2ND AVE S",    "Industrial District"),
+    ("3RD AVE S",    "Industrial District"),
+    ("4TH AVE S",    "Industrial District"),
+    ("5TH AVE S",    "Industrial District"),
+    ("6TH AVE S",    "Industrial District"),
+    ("S KING ST",    "Industrial District"),
+    ("S JACKSON",    "Industrial District"),
+    ("S ROYAL",      "Industrial District"),
+    ("S ATLANTIC",   "Industrial District"),
+    ("S LANDER",     "Industrial District"),
+    ("S WELLER",     "Industrial District"),
+    # Capitol Hill: E-prefix cross streets and Broadway/numbered avenues
+    ("E PIKE ST",    "Capitol Hill"),
+    ("E PINE ST",    "Capitol Hill"),
+    ("E OLIVE",      "Capitol Hill"),
+    ("E HOWELL",     "Capitol Hill"),
+    ("E DENNY",      "Capitol Hill"),
+    ("E MADISON",    "Capitol Hill"),
+    ("E SENECA",     "Capitol Hill"),
+    ("E SPRING",     "Capitol Hill"),
+    ("E UNION",      "Capitol Hill"),
+    ("BROADWAY",     "Capitol Hill"),
+    ("10TH AVE B",   "Capitol Hill"),
+    ("11TH AVE B",   "Capitol Hill"),
+    ("12TH AVE B",   "Capitol Hill"),
+    ("13TH AVE B",   "Capitol Hill"),
+    ("14TH AVE B",   "Capitol Hill"),
+    ("15TH AVE B",   "Capitol Hill"),
+    # South Lake Union: Westlake, Dexter, Mercer, Thomas, Harrison
+    ("WESTLAKE",     "South Lake Union"),
+    ("DEXTER",       "South Lake Union"),
+    ("MERCER ST",    "South Lake Union"),
+    ("THOMAS ST",    "South Lake Union"),
+    ("HARRISON ST",  "South Lake Union"),
+    ("REPUBLICAN",   "South Lake Union"),
+    ("VALLEY ST",    "South Lake Union"),
+    ("TERRY AVE",    "South Lake Union"),
+    ("BOREN AVE",    "South Lake Union"),
+    ("DENNY WAY",    "South Lake Union"),
+]
 
 
 def map_blockface_to_region(blockface: pd.Series) -> pd.Series:
     upper = blockface.str.upper().fillna("")
     region = pd.Series("Downtown Seattle", index=blockface.index)
-    for keyword, reg in BLOCKFACE_REGION.items():
-        region = region.where(~upper.str.contains(keyword), reg)
+    # Apply in reverse so first rule in the list takes precedence
+    for keyword, reg in reversed(BLOCKFACE_RULES):
+        mask = upper.str.contains(keyword, regex=False)
+        region = region.where(~mask, reg)
     return region
 
 
