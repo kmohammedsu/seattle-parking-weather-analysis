@@ -52,6 +52,9 @@ def main():
     # Step 2 — Aggregate raw data into features
     results["aggregate"]      = run_step("Aggregate features",      "aggregate_features")
 
+    # Step 3 — Train model on latest feature window
+    results["train"]          = run_step("Train model",             "train_model")
+
     # Summary
     log("-" * 60)
     passed = sum(v for v in results.values())
@@ -63,7 +66,7 @@ def main():
         log(f"Failed steps: {', '.join(failed)}")
         sys.exit(1)
 
-    log("All steps complete. Ready for model training.")
+    log("All steps complete.")
 
 
 if __name__ == "__main__":

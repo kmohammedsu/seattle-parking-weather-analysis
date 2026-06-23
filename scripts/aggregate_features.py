@@ -61,7 +61,6 @@ def aggregate_parking(df: pd.DataFrame) -> pd.DataFrame:
         total_occupied=("avg_occupied", "sum"),
         num_blockfaces=("blockfacename", "nunique"),
     ).reset_index()
-    agg["turnover_proxy"] = agg["total_occupied"] / agg["total_spaces"].replace(0, np.nan)
     return agg
 
 
@@ -169,8 +168,9 @@ def add_time_features(df: pd.DataFrame) -> pd.DataFrame:
     df["month"] = df["hour"].dt.month
     df["year"] = df["hour"].dt.year
     df["is_weekend"] = df["day_of_week"] >= 5
-    df["is_peak_am"] = df["hour_of_day"].between(7, 9)
-    df["is_peak_pm"] = df["hour_of_day"].between(16, 19)
+    # Based on actual data: real Seattle meter peaks are midday and late afternoon
+    df["is_peak_am"] = df["hour_of_day"].between(10, 13)
+    df["is_peak_pm"] = df["hour_of_day"].between(17, 19)
     # Cyclical encoding so model understands hour 23 ≈ hour 0
     df["hour_sin"] = np.sin(2 * np.pi * df["hour_of_day"] / 24)
     df["hour_cos"] = np.cos(2 * np.pi * df["hour_of_day"] / 24)
