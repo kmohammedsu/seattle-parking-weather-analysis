@@ -1,7 +1,17 @@
-# Data files — never commit raw data
-data/*.csv
-data/*.json
+# Large raw/intermediate data files — not committed
+data/live_parking_occupancy.csv
+data/processed_weather_data.csv
+data/seattle_weather_by_region.json
+data/backfill_progress.json
+data/Annual_Parking_Study_Data*.csv
+data/seattle_events.csv
+data/seattle_event_permits.csv
+data/seattle_road_closures.csv
+data/seattle_holidays.csv
 data/*.pkl
+
+# Generated outputs ARE committed (features, pricing, revenue, ROI)
+# so the dashboard works without re-running the pipeline
 
 # Model files — stored on Hugging Face Hub
 models/*.pkl

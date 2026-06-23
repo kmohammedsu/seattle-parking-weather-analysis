@@ -58,6 +58,7 @@ def main():
     # Step 4 — Revenue intelligence
     results["pricing"]        = run_step("Pricing recommendations", "pricing_optimizer")
     results["revenue"]        = run_step("Revenue analysis",        "revenue_analyzer")
+    results["roi"]            = run_step("Infrastructure ROI",      "infrastructure_roi")
 
     # Summary
     log("-" * 60)

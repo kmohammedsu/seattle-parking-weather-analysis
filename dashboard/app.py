@@ -42,6 +42,14 @@ def load_features():
 
 
 @st.cache_data(ttl=3600)
+def load_roi():
+    f = DATA_DIR / "infrastructure_roi.csv"
+    if not f.exists():
+        return pd.DataFrame()
+    return pd.read_csv(f)
+
+
+@st.cache_data(ttl=3600)
 def load_revenue_summary():
     f = DATA_DIR / "revenue_summary.csv"
     if not f.exists():
@@ -105,7 +113,7 @@ st.sidebar.caption("Revenue Optimization Platform")
 
 page = st.sidebar.radio(
     "Navigate",
-    ["Overview", "Revenue", "Forecast", "Pricing", "Geo Map"],
+    ["Overview", "Revenue", "Forecast", "Pricing", "Infrastructure ROI", "Geo Map"],
     label_visibility="collapsed",
 )
 
@@ -113,6 +121,7 @@ features = load_features()
 pricing = load_pricing()
 rev_summary = load_revenue_summary()
 rev_detail = load_revenue_detail()
+roi_df = load_roi()
 model, feat_cols = load_model()
 perf = load_perf()
 
@@ -366,6 +375,95 @@ elif page == "Pricing":
     st.dataframe(
         styled.style.applymap(color_action, subset=["Action"]),
         use_container_width=True, hide_index=True,
+    )
+
+# ── Page: Infrastructure ROI ─────────────────────────────────────────────────
+
+elif page == "Infrastructure ROI":
+    st.title("🏗️ Infrastructure ROI Calculator")
+    st.caption("Should Seattle build more parking? Cost-benefit analysis by area and infrastructure type.")
+
+    if roi_df.empty:
+        st.warning("No ROI data. Run `python scripts/infrastructure_roi.py`.")
+        st.stop()
+
+    # Summary KPIs
+    viable = roi_df[roi_df["viable"]]
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Scenarios Analyzed", len(roi_df))
+    col2.metric("Viable Investments", len(viable), help="Breakeven occupancy < current occupancy")
+    col3.metric("Best ROI", f"{viable['roi_percent'].max():.1f}%" if not viable.empty else "N/A")
+
+    st.divider()
+
+    # Filter controls
+    col1, col2 = st.columns(2)
+    region_filter = col1.selectbox("Region", ["All"] + sorted(roi_df["region"].unique()))
+    infra_filter = col2.selectbox("Infrastructure Type", ["All"] + sorted(roi_df["infra_type"].unique()))
+
+    disp = roi_df.copy()
+    if region_filter != "All":
+        disp = disp[disp["region"] == region_filter]
+    if infra_filter != "All":
+        disp = disp[disp["infra_type"] == infra_filter]
+
+    # ROI chart
+    fig = px.bar(
+        disp.sort_values("roi_percent", ascending=False),
+        x="region", y="roi_percent",
+        color="infra_type",
+        barmode="group",
+        facet_col="n_new_spaces",
+        title="ROI % by Region and Infrastructure Type",
+        labels={"roi_percent": "ROI %", "region": "Region", "infra_type": "Type"},
+        height=400,
+        color_discrete_map={"surface_lot": "steelblue", "structured_garage": "darkorange"},
+    )
+    fig.add_hline(y=0, line_dash="solid", line_color="red", line_width=1)
+    st.plotly_chart(fig, use_container_width=True)
+
+    # Breakeven comparison
+    fig2 = px.scatter(
+        disp,
+        x="current_occupancy", y="breakeven_occupancy",
+        color="infra_type", size="n_new_spaces",
+        hover_name="region",
+        hover_data={"roi_percent": True, "payback_years": True},
+        title="Current Occupancy vs Breakeven Occupancy",
+        labels={"current_occupancy": "Current Occupancy",
+                "breakeven_occupancy": "Breakeven Occupancy"},
+        height=400,
+    )
+    fig2.add_shape(type="line", x0=0, y0=0, x1=1, y1=1,
+                   line=dict(dash="dash", color="gray"))
+    fig2.update_xaxes(tickformat=".0%")
+    fig2.update_yaxes(tickformat=".0%")
+    st.caption("Points below the diagonal line are viable (breakeven < current demand).")
+    st.plotly_chart(fig2, use_container_width=True)
+
+    # Detailed table
+    st.subheader("Scenario Details")
+    table = disp[[
+        "region", "infra_type", "n_new_spaces", "current_occupancy",
+        "breakeven_occupancy", "total_construction_cost",
+        "net_annual_income", "roi_percent", "payback_years", "viable"
+    ]].copy()
+    table["current_occupancy"] = table["current_occupancy"].map("{:.1%}".format)
+    table["breakeven_occupancy"] = table["breakeven_occupancy"].map("{:.1%}".format)
+    table["total_construction_cost"] = table["total_construction_cost"].map("${:,.0f}".format)
+    table["net_annual_income"] = table["net_annual_income"].map("${:+,.0f}".format)
+    table["roi_percent"] = table["roi_percent"].map("{:.1f}%".format)
+    table.columns = ["Region", "Type", "Spaces", "Curr. Occ.", "Breakeven Occ.",
+                     "Construction Cost", "Net Annual", "ROI %", "Payback (yrs)", "Viable"]
+    st.dataframe(table.style.applymap(
+        lambda v: "background-color: #e8f4fd" if v == True else
+                  ("background-color: #fde8e8" if v == False else ""),
+        subset=["Viable"]
+    ), use_container_width=True, hide_index=True)
+
+    st.caption(
+        "Construction costs: surface lot $5K/space, structured garage $45K/space "
+        "(Seattle 2024 benchmarks). Bond rate 4.5%, 20-year term, $800/space/yr operating."
     )
 
 # ── Page: Geo Map ────────────────────────────────────────────────────────────
