@@ -1,18 +1,10 @@
 """
 Seattle Parking Revenue Intelligence Platform
 City of Seattle Decision-Support Dashboard
-
-Pages:
-  1. Overview       — live occupancy snapshot across all regions
-  2. Revenue        — current vs optimized revenue analysis
-  3. Forecast       — 7-day demand predictions by region
-  4. Pricing        — dynamic pricing recommendations (SMC 11.16.121)
-  5. Geo Map        — blockface-level occupancy heatmap
 """
 import pickle
 import json
 from pathlib import Path
-from datetime import datetime
 
 import numpy as np
 import pandas as pd
@@ -33,55 +25,157 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# ── Shared loaders (cached) ──────────────────────────────────────────────────
+# ── Global CSS ────────────────────────────────────────────────────────────────
+
+st.markdown("""
+<style>
+/* Main background */
+[data-testid="stAppViewContainer"] { background: #0f1117; }
+[data-testid="stSidebar"] { background: #161b27; border-right: 1px solid #2a2f3e; }
+
+/* Remove default padding */
+.block-container { padding-top: 1.5rem !important; padding-bottom: 1rem !important; }
+
+/* KPI card */
+.kpi-card {
+    background: #1a2035;
+    border: 1px solid #2a3550;
+    border-radius: 12px;
+    padding: 20px 24px;
+    text-align: center;
+    height: 100%;
+}
+.kpi-label {
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #7b8db0;
+    margin-bottom: 8px;
+}
+.kpi-value {
+    font-size: 32px;
+    font-weight: 700;
+    color: #e8eaf6;
+    line-height: 1.1;
+}
+.kpi-delta {
+    font-size: 13px;
+    margin-top: 6px;
+    font-weight: 600;
+}
+.kpi-good  { color: #4caf8f; }
+.kpi-warn  { color: #f5a623; }
+.kpi-bad   { color: #e05c5c; }
+.kpi-neutral { color: #7b8db0; }
+
+/* Section header */
+.section-header {
+    font-size: 13px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: #4a90d9;
+    border-bottom: 1px solid #2a3550;
+    padding-bottom: 6px;
+    margin: 24px 0 16px 0;
+}
+
+/* Status badge */
+.badge {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 20px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+}
+.badge-red    { background: #3d1515; color: #e05c5c; border: 1px solid #5c2020; }
+.badge-green  { background: #153d2a; color: #4caf8f; border: 1px solid #205c3e; }
+.badge-blue   { background: #152a3d; color: #4a90d9; border: 1px solid #20405c; }
+.badge-yellow { background: #3d2e15; color: #f5a623; border: 1px solid #5c4420; }
+
+/* Sidebar nav */
+[data-testid="stSidebar"] .stRadio label {
+    font-size: 14px !important;
+    font-weight: 500;
+}
+
+/* Hide streamlit branding */
+#MainMenu { visibility: hidden; }
+footer { visibility: hidden; }
+</style>
+""", unsafe_allow_html=True)
+
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+def kpi(label: str, value: str, delta: str = "", delta_class: str = "kpi-neutral"):
+    delta_html = f'<div class="kpi-delta {delta_class}">{delta}</div>' if delta else ""
+    st.markdown(f"""
+    <div class="kpi-card">
+        <div class="kpi-label">{label}</div>
+        <div class="kpi-value">{value}</div>
+        {delta_html}
+    </div>
+    """, unsafe_allow_html=True)
+
+
+def section(title: str):
+    st.markdown(f'<div class="section-header">{title}</div>', unsafe_allow_html=True)
+
+
+def badge(text: str, color: str = "blue") -> str:
+    return f'<span class="badge badge-{color}">{text}</span>'
+
+
+PLOTLY_THEME = dict(
+    paper_bgcolor="rgba(0,0,0,0)",
+    plot_bgcolor="rgba(26,32,53,0.6)",
+    font=dict(color="#c8d0e8", size=12),
+    xaxis=dict(gridcolor="#2a3550", zeroline=False),
+    yaxis=dict(gridcolor="#2a3550", zeroline=False),
+    legend=dict(bgcolor="rgba(0,0,0,0)", bordercolor="#2a3550"),
+    margin=dict(l=40, r=20, t=50, b=40),
+)
+
+
+# ── Loaders ───────────────────────────────────────────────────────────────────
 
 @st.cache_data(ttl=3600)
 def load_features():
     f = DATA_DIR / "features.csv"
-    if not f.exists():
-        return pd.DataFrame()
-    return pd.read_csv(f, parse_dates=["hour"])
-
-
-@st.cache_data(ttl=3600)
-def load_roi():
-    f = DATA_DIR / "infrastructure_roi.csv"
-    if not f.exists():
-        return pd.DataFrame()
-    return pd.read_csv(f)
+    return pd.read_csv(f, parse_dates=["hour"]) if f.exists() else pd.DataFrame()
 
 
 @st.cache_data(ttl=3600)
 def load_revenue_summary():
     f = DATA_DIR / "revenue_summary.csv"
-    if not f.exists():
-        return pd.DataFrame()
-    df = pd.read_csv(f, parse_dates=["date"])
-    return df
+    return pd.read_csv(f, parse_dates=["date"]) if f.exists() else pd.DataFrame()
 
 
 @st.cache_data(ttl=3600)
 def load_revenue_detail():
     f = DATA_DIR / "revenue_by_region_hour.csv"
-    if not f.exists():
-        return pd.DataFrame()
-    return pd.read_csv(f)
+    return pd.read_csv(f) if f.exists() else pd.DataFrame()
 
 
 @st.cache_data(ttl=3600)
 def load_pricing():
     f = DATA_DIR / "pricing_recommendations.csv"
-    if not f.exists():
-        return pd.DataFrame()
-    return pd.read_csv(f)
+    return pd.read_csv(f) if f.exists() else pd.DataFrame()
+
+
+@st.cache_data(ttl=3600)
+def load_roi():
+    f = DATA_DIR / "infrastructure_roi.csv"
+    return pd.read_csv(f) if f.exists() else pd.DataFrame()
 
 
 @st.cache_resource
 def load_model():
     model_file = MODELS_DIR / "parking_demand_lgbm.pkl"
     feat_file = MODELS_DIR / "feature_columns.json"
-
-    # Try local first, fall back to Hugging Face Hub
     if not model_file.exists():
         try:
             import sys
@@ -90,7 +184,6 @@ def load_model():
             download_model(MODELS_DIR)
         except Exception:
             pass
-
     if not model_file.exists():
         return None, None
     with open(model_file, "rb") as f:
@@ -102,22 +195,10 @@ def load_model():
 @st.cache_data(ttl=3600)
 def load_perf():
     f = MODELS_DIR / "performance" / "final_model_performance.csv"
-    if not f.exists():
-        return {}
-    return pd.read_csv(f).iloc[0].to_dict()
+    return pd.read_csv(f).iloc[0].to_dict() if f.exists() else {}
 
 
-# ── Sidebar ──────────────────────────────────────────────────────────────────
-
-st.sidebar.markdown("## 🏙️ City of Seattle")
-st.sidebar.title("Parking Intelligence")
-st.sidebar.caption("Revenue Optimization Platform")
-
-page = st.sidebar.radio(
-    "Navigate",
-    ["Overview", "Revenue", "Forecast", "Pricing", "Infrastructure ROI", "Geo Map"],
-    label_visibility="collapsed",
-)
+# ── Load data ─────────────────────────────────────────────────────────────────
 
 features = load_features()
 pricing = load_pricing()
@@ -127,145 +208,319 @@ roi_df = load_roi()
 model, feat_cols = load_model()
 perf = load_perf()
 
-last_updated = features["hour"].max().strftime("%b %d %Y %H:%M") if not features.empty else "No data"
-st.sidebar.divider()
-st.sidebar.caption(f"Data through: **{last_updated}**")
-st.sidebar.caption(f"Model R²: **{perf.get('r2', 'N/A'):.3f}**" if perf else "Model: not trained")
 
-# ── Page: Overview ───────────────────────────────────────────────────────────
+# ── Sidebar ───────────────────────────────────────────────────────────────────
 
-if page == "Overview":
-    st.title("🅿️ Seattle Parking — Live Overview")
-    st.caption("Hourly occupancy across all metered regions")
+with st.sidebar:
+    st.markdown("### 🏙️ City of Seattle")
+    st.markdown("**Parking Revenue Intelligence**")
+    st.caption("SMC 11.16.121 Optimization Platform")
+    st.divider()
+
+    page = st.radio(
+        "Navigation",
+        ["📊 Overview", "💰 Revenue", "📈 Forecast", "🎯 Pricing", "🏗️ Infrastructure", "🗺️ Geo Map"],
+        label_visibility="collapsed",
+    )
+
+    st.divider()
+    if not features.empty:
+        last_updated = features["hour"].max().strftime("%b %d %Y, %H:%M")
+        n_days = features["hour"].dt.date.nunique()
+        avg_occ = features["avg_occupancy_rate"].mean()
+        st.markdown(f"**Data through:** {last_updated}")
+        st.markdown(f"**Coverage:** {n_days} days")
+        occ_color = "🟢" if 0.70 <= avg_occ <= 0.85 else ("🔴" if avg_occ > 0.85 else "🔵")
+        st.markdown(f"**System occupancy:** {occ_color} {avg_occ:.1%}")
+    if perf:
+        st.markdown(f"**Model R²:** {perf.get('r2', 0):.3f}")
+    st.divider()
+    st.caption("Rate bounds: $0.50–$8.00/hr")
+    st.caption("Target: 70–85% occupancy")
+
+
+# ── Page: Overview ────────────────────────────────────────────────────────────
+
+if page == "📊 Overview":
+    st.title("Seattle Parking — Live Overview")
 
     if features.empty:
-        st.warning("No feature data available. Run the pipeline first.")
+        st.error("No feature data available. Run the pipeline first.")
         st.stop()
 
     recent = features[features["hour"] >= features["hour"].max() - pd.Timedelta(hours=48)]
+    avg_occ = features["avg_occupancy_rate"].mean()
+    recent_occ = recent["avg_occupancy_rate"].mean() if not recent.empty else 0
+    n_regions = features["region"].nunique()
+    n_days = features["hour"].dt.date.nunique()
 
-    # KPI row
+    occ_cls = "kpi-good" if 0.70 <= avg_occ <= 0.85 else ("kpi-bad" if avg_occ > 0.85 else "kpi-warn")
+    r_cls = "kpi-good" if 0.70 <= recent_occ <= 0.85 else ("kpi-bad" if recent_occ > 0.85 else "kpi-warn")
+
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        avg_occ = features["avg_occupancy_rate"].mean()
-        st.metric("Avg Occupancy (all time)", f"{avg_occ:.1%}")
+        kpi("System Occupancy", f"{avg_occ:.1%}",
+            "▲ Above target" if avg_occ > 0.85 else ("In target band" if avg_occ >= 0.70 else "▼ Below target"),
+            occ_cls)
     with col2:
-        recent_occ = recent["avg_occupancy_rate"].mean()
-        st.metric("Avg Occupancy (48h)", f"{recent_occ:.1%}")
+        kpi("Last 48h Occupancy", f"{recent_occ:.1%}", "", r_cls)
     with col3:
-        n_regions = features["region"].nunique()
-        st.metric("Regions Tracked", n_regions)
+        kpi("Regions Tracked", str(n_regions), "Active meter zones", "kpi-neutral")
     with col4:
-        n_days = features["hour"].dt.date.nunique()
-        st.metric("Days of Data", f"{n_days:,}")
+        kpi("Days of Data", f"{n_days:,}", "In feature store", "kpi-neutral")
 
-    st.divider()
+    st.markdown("<br>", unsafe_allow_html=True)
 
-    # Occupancy by hour heatmap — reindex to all 7 days in case some are missing
-    DAY_NAMES = {0: "Mon", 1: "Tue", 2: "Wed", 3: "Thu", 4: "Fri", 5: "Sat", 6: "Sun"}
-    pivot = (
-        features
-        .groupby(["hour_of_day", "day_of_week"])["avg_occupancy_rate"]
-        .mean()
-        .unstack(fill_value=0)
-        .reindex(columns=range(7), fill_value=0)
-    )
-    pivot.columns = [DAY_NAMES[c] for c in pivot.columns]
-    fig = px.imshow(
-        pivot,
-        labels={"x": "Day of Week", "y": "Hour of Day", "color": "Occupancy"},
-        color_continuous_scale="RdYlGn_r",
-        zmin=0, zmax=1,
-        title="Average Occupancy: Hour of Day × Day of Week",
-        height=400,
-    )
-    st.plotly_chart(fig, use_container_width=True)
-
-    # By region
+    # Region status cards
+    section("REGION STATUS")
     region_occ = (
         features.groupby("region")["avg_occupancy_rate"]
         .mean()
         .sort_values(ascending=False)
         .reset_index()
     )
-    fig2 = px.bar(
-        region_occ, x="region", y="avg_occupancy_rate",
-        title="Average Occupancy by Region",
-        labels={"avg_occupancy_rate": "Occupancy Rate", "region": "Region"},
-        color="avg_occupancy_rate",
-        color_continuous_scale="RdYlGn_r",
+
+    cols = st.columns(len(region_occ))
+    for i, (_, row) in enumerate(region_occ.iterrows()):
+        rate = row["avg_occupancy_rate"]
+        status = ("HIGH DEMAND", "red") if rate > 0.85 else (("ON TARGET", "green") if rate >= 0.70 else ("UNDERUTILIZED", "blue"))
+        action = "Raise rates →" if rate > 0.85 else ("Hold →" if rate >= 0.70 else "Analyze demand →")
+        with cols[i]:
+            st.markdown(f"""
+            <div class="kpi-card">
+                <div class="kpi-label">{row['region']}</div>
+                <div class="kpi-value">{rate:.0%}</div>
+                <div style="margin-top:8px">{badge(*status)}</div>
+                <div style="font-size:11px;color:#7b8db0;margin-top:6px">{action}</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    section("OCCUPANCY PATTERNS")
+
+    col_left, col_right = st.columns(2)
+
+    with col_left:
+        DAY_NAMES = {0: "Mon", 1: "Tue", 2: "Wed", 3: "Thu", 4: "Fri", 5: "Sat", 6: "Sun"}
+        pivot = (
+            features
+            .groupby(["hour_of_day", "day_of_week"])["avg_occupancy_rate"]
+            .mean()
+            .unstack(fill_value=0)
+            .reindex(columns=range(7), fill_value=0)
+        )
+        pivot.columns = [DAY_NAMES[c] for c in pivot.columns]
+        fig = px.imshow(
+            pivot,
+            labels={"x": "Day", "y": "Hour", "color": "Occupancy"},
+            color_continuous_scale="RdYlGn_r",
+            zmin=0, zmax=1,
+            title="Occupancy Heatmap: Hour × Day",
+            height=380,
+        )
+        fig.update_layout(**PLOTLY_THEME)
+        fig.update_coloraxes(colorbar=dict(tickformat=".0%", len=0.8))
+        st.plotly_chart(fig, use_container_width=True)
+
+    with col_right:
+        # 7-day trend
+        daily_avg = (
+            features.groupby(features["hour"].dt.date)["avg_occupancy_rate"]
+            .mean()
+            .reset_index()
+            .rename(columns={"hour": "date"})
+            .tail(30)
+        )
+        fig2 = go.Figure()
+        fig2.add_trace(go.Scatter(
+            x=daily_avg["date"], y=daily_avg["avg_occupancy_rate"],
+            fill="tozeroy", fillcolor="rgba(74,144,217,0.15)",
+            line=dict(color="#4a90d9", width=2),
+            name="Occupancy",
+        ))
+        fig2.add_hline(y=0.85, line_dash="dash", line_color="#e05c5c",
+                       annotation_text="85% upper", annotation_position="top right")
+        fig2.add_hline(y=0.70, line_dash="dash", line_color="#f5a623",
+                       annotation_text="70% lower", annotation_position="bottom right")
+        fig2.update_layout(
+            title="Daily Average Occupancy (last 30 days)",
+            yaxis=dict(tickformat=".0%", range=[0, 1]),
+            height=380,
+            **PLOTLY_THEME,
+        )
+        st.plotly_chart(fig2, use_container_width=True)
+
+    section("PEAK HOURS BY REGION")
+    hourly_region = (
+        features.groupby(["region", "hour_of_day"])["avg_occupancy_rate"]
+        .mean()
+        .reset_index()
     )
-    fig2.add_hline(y=0.85, line_dash="dash", line_color="red",
-                   annotation_text="85% target upper", annotation_position="top right")
-    fig2.add_hline(y=0.70, line_dash="dash", line_color="orange",
-                   annotation_text="70% target lower", annotation_position="bottom right")
-    fig2.update_yaxes(tickformat=".0%", range=[0, 1])
-    st.plotly_chart(fig2, use_container_width=True)
+    fig3 = px.line(
+        hourly_region, x="hour_of_day", y="avg_occupancy_rate", color="region",
+        title="Average Occupancy by Hour of Day",
+        labels={"hour_of_day": "Hour", "avg_occupancy_rate": "Occupancy", "region": "Region"},
+        height=350,
+    )
+    fig3.add_hrect(y0=0.70, y1=0.85, fillcolor="rgba(76,175,143,0.08)",
+                   line_width=0, annotation_text="Target band")
+    fig3.update_yaxes(tickformat=".0%", range=[0, 1])
+    fig3.update_layout(**PLOTLY_THEME)
+    st.plotly_chart(fig3, use_container_width=True)
 
-# ── Page: Revenue ────────────────────────────────────────────────────────────
 
-elif page == "Revenue":
-    st.title("💰 Revenue Intelligence")
-    st.caption("Current vs optimized revenue under dynamic pricing (SMC 11.16.121)")
+# ── Page: Revenue ─────────────────────────────────────────────────────────────
+
+elif page == "💰 Revenue":
+    st.title("Revenue Intelligence")
+    st.caption("Current earnings vs full potential at 80% occupancy target with optimal pricing")
 
     if rev_summary.empty:
-        st.warning("Revenue data not yet generated. Run `python scripts/revenue_analyzer.py`.")
+        st.error("Revenue data not generated. Run `python scripts/revenue_analyzer.py`.")
         st.stop()
 
     total_current = rev_summary["current_revenue"].sum()
+    total_target = rev_summary.get("target_revenue", rev_summary["optimized_revenue"]).sum() \
+        if "target_revenue" in rev_summary.columns else None
     total_optimized = rev_summary["optimized_revenue"].sum()
     total_uplift = total_optimized - total_current
     uplift_pct = total_uplift / max(total_current, 0.01) * 100
 
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Total Revenue (Current Rates)", f"${total_current:,.0f}")
-    col2.metric("Total Revenue (Optimized Rates)", f"${total_optimized:,.0f}")
-    col3.metric("Potential Uplift", f"${total_uplift:+,.0f}", f"{uplift_pct:+.1f}%")
+    # Annualise from the period we have
+    n_days = rev_summary["date"].nunique()
+    annual_current = total_current / max(n_days, 1) * 365
+    annual_optimized = total_optimized / max(n_days, 1) * 365
+    annual_uplift = annual_optimized - annual_current
 
-    st.divider()
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        kpi("Revenue (Current Rates)", f"${total_current:,.0f}",
+            f"Over {n_days} days", "kpi-neutral")
+    with col2:
+        kpi("Revenue (Optimized Rates)", f"${total_optimized:,.0f}",
+            f"At 80% occupancy", "kpi-good")
+    with col3:
+        kpi("Potential Uplift", f"${total_uplift:+,.0f}",
+            f"+{uplift_pct:.1f}% gain available", "kpi-good")
+    with col4:
+        kpi("Annual Projection", f"${annual_uplift:+,.0f}",
+            "Incremental per year", "kpi-good")
+
+    st.markdown(f"""
+    <div style="background:#153d2a;border:1px solid #205c3e;border-radius:10px;
+                padding:14px 20px;margin:16px 0;color:#c8d0e8;font-size:13px;">
+        💡 <b>How to read this:</b> "Current" = what meters actually earned at today's rates and occupancy.
+        "Optimized" = projected earnings if occupancy reaches the city's 80% target with SMC 11.16.121
+        rate adjustments. The uplift is always positive — the city is leaving money on the table
+        relative to target utilization.
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    section("REVENUE TREND")
 
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=rev_summary["date"], y=rev_summary["current_revenue"],
-                             name="Current Rates", line=dict(color="steelblue")))
-    fig.add_trace(go.Scatter(x=rev_summary["date"], y=rev_summary["optimized_revenue"],
-                             name="Optimized Rates", line=dict(color="green", dash="dash")))
-    fig.update_layout(title="Daily Revenue: Current vs Optimized",
-                      yaxis_title="Revenue ($)", xaxis_title="Date", height=350)
+    fig.add_trace(go.Bar(
+        x=rev_summary["date"], y=rev_summary["current_revenue"],
+        name="Current Revenue", marker_color="#4a90d9",
+        opacity=0.8,
+    ))
+    if "target_revenue" in rev_summary.columns:
+        fig.add_trace(go.Scatter(
+            x=rev_summary["date"], y=rev_summary["target_revenue"],
+            name="At 80% Occupancy (current rates)",
+            line=dict(color="#f5a623", width=2, dash="dot"),
+        ))
+    fig.add_trace(go.Scatter(
+        x=rev_summary["date"], y=rev_summary["optimized_revenue"],
+        name="Optimized (80% occ + optimal rates)",
+        line=dict(color="#4caf8f", width=2.5),
+    ))
+    fig.update_layout(
+        title="Daily Revenue: Current vs Potential",
+        yaxis_title="Revenue ($)",
+        barmode="overlay",
+        height=380,
+        **PLOTLY_THEME,
+    )
     st.plotly_chart(fig, use_container_width=True)
 
     if not rev_detail.empty:
-        pivot = rev_detail.pivot_table(
-            index="hour_of_day", columns="region",
-            values="revenue_uplift", aggfunc="mean"
-        )
-        fig2 = px.imshow(
-            pivot,
-            labels={"x": "Region", "y": "Hour", "color": "Uplift ($/hr)"},
-            color_continuous_scale="RdYlGn",
-            title="Revenue Uplift Opportunity by Region × Hour",
-            height=400,
-        )
-        st.plotly_chart(fig2, use_container_width=True)
+        col_left, col_right = st.columns(2)
 
-# ── Page: Forecast ───────────────────────────────────────────────────────────
+        with col_left:
+            section("UPLIFT BY REGION")
+            region_uplift = (
+                rev_detail.groupby("region")
+                .agg(
+                    current=("current_revenue_per_hour", "sum"),
+                    optimized=("optimized_revenue_per_hour", "sum"),
+                )
+                .assign(uplift=lambda x: x["optimized"] - x["current"])
+                .sort_values("uplift", ascending=True)
+                .reset_index()
+            )
+            fig2 = go.Figure(go.Bar(
+                x=region_uplift["uplift"],
+                y=region_uplift["region"],
+                orientation="h",
+                marker_color="#4caf8f",
+                text=region_uplift["uplift"].map("${:,.0f}".format),
+                textposition="outside",
+            ))
+            fig2.update_layout(
+                title="Revenue Uplift by Region ($/period)",
+                xaxis_title="Uplift ($)",
+                height=320,
+                **PLOTLY_THEME,
+            )
+            st.plotly_chart(fig2, use_container_width=True)
 
-elif page == "Forecast":
-    st.title("📈 Demand Forecast")
-    st.caption("7-day occupancy predictions by region")
+        with col_right:
+            section("UPLIFT HEATMAP: HOUR × REGION")
+            pivot = rev_detail.pivot_table(
+                index="hour_of_day", columns="region",
+                values="revenue_uplift", aggfunc="mean",
+            )
+            fig3 = px.imshow(
+                pivot,
+                labels={"x": "Region", "y": "Hour", "color": "Uplift ($/hr)"},
+                color_continuous_scale="Greens",
+                title="Revenue Uplift per Hour by Region",
+                height=320,
+            )
+            fig3.update_layout(**PLOTLY_THEME)
+            st.plotly_chart(fig3, use_container_width=True)
+
+
+# ── Page: Forecast ────────────────────────────────────────────────────────────
+
+elif page == "📈 Forecast":
+    st.title("Demand Forecast")
+    st.caption("7-day occupancy predictions by region — LightGBM model")
 
     if model is None:
-        st.warning("No trained model found. Run `python scripts/train_model.py` first.")
+        st.error("No trained model found. Run `python scripts/train_model.py` first.")
         st.stop()
-
     if features.empty:
-        st.warning("No feature data. Run the pipeline first.")
+        st.error("No feature data. Run the pipeline first.")
         st.stop()
 
-    # Build next-7-days prediction frame
+    perf_r2 = perf.get("r2", 0)
+    perf_rmse = perf.get("rmse", 0)
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        kpi("Model R²", f"{perf_r2:.3f}", "Variance explained", "kpi-good" if perf_r2 > 0.85 else "kpi-warn")
+    with col2:
+        kpi("RMSE", f"{perf_rmse:.3f}", "Occupancy rate error", "kpi-neutral")
+    with col3:
+        kpi("Training Samples", f"{int(perf.get('n_train', 0)):,}", "Rolling 12-month window", "kpi-neutral")
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
     last_hour = features["hour"].max()
     future_hours = pd.date_range(
-        start=last_hour + pd.Timedelta(hours=1),
-        periods=7 * 24, freq="h"
+        start=last_hour + pd.Timedelta(hours=1), periods=7 * 24, freq="h"
     )
     regions = features["region"].unique()
     future = pd.MultiIndex.from_product([future_hours, regions], names=["hour", "region"])
@@ -285,85 +540,161 @@ elif page == "Forecast":
     future_df["month_sin"] = np.sin(2 * np.pi * future_df["month"] / 12)
     future_df["month_cos"] = np.cos(2 * np.pi * future_df["month"] / 12)
 
-    # Fill space counts from historical averages
     space_avgs = features.groupby("region")["total_spaces"].mean()
     future_df["total_spaces"] = future_df["region"].map(space_avgs).fillna(100)
-    future_df["num_blockfaces"] = features.groupby("region")["num_blockfaces"].mean().reindex(
-        future_df["region"]).values
+    future_df["num_blockfaces"] = (
+        features.groupby("region")["num_blockfaces"].mean()
+        .reindex(future_df["region"]).values
+    )
 
-    # Fill weather and event cols with 0/False (forward-looking — we don't have them yet)
     for col in feat_cols:
         if col not in future_df.columns:
             future_df[col] = 0
-
     for col in feat_cols:
         if future_df[col].dtype == bool:
             future_df[col] = future_df[col].astype(int)
 
-    available = [c for c in feat_cols if c in future_df.columns]
-    future_df["predicted_occupancy"] = model.predict(future_df[available].fillna(0))
-    future_df["predicted_occupancy"] = future_df["predicted_occupancy"].clip(0, 1)
+    future_df["predicted_occupancy"] = model.predict(
+        future_df[[c for c in feat_cols if c in future_df.columns]].fillna(0)
+    ).clip(0, 1)
 
     selected_region = st.selectbox("Select Region", sorted(regions))
     region_forecast = future_df[future_df["region"] == selected_region].copy()
 
-    fig = px.line(
-        region_forecast, x="hour", y="predicted_occupancy",
-        title=f"7-Day Occupancy Forecast — {selected_region}",
-        labels={"predicted_occupancy": "Predicted Occupancy", "hour": ""},
-        height=400,
-    )
-    fig.add_hline(y=0.85, line_dash="dash", line_color="red", annotation_text="85% (reduce supply pressure)")
-    fig.add_hline(y=0.70, line_dash="dash", line_color="orange", annotation_text="70% (stimulate demand)")
-    fig.update_yaxes(tickformat=".0%", range=[0, 1])
-    st.plotly_chart(fig, use_container_width=True)
-
-    # Peak hours table
-    peak_hours = (
-        region_forecast[region_forecast["predicted_occupancy"] > 0.85]
-        [["hour", "predicted_occupancy"]]
-        .assign(predicted_occupancy=lambda x: x["predicted_occupancy"].map("{:.1%}".format))
-        .rename(columns={"hour": "Time", "predicted_occupancy": "Predicted Occupancy"})
-    )
-    if not peak_hours.empty:
-        st.subheader(f"High-demand hours (>85%) — {selected_region}")
-        st.dataframe(peak_hours, use_container_width=True, hide_index=True)
-
-# ── Page: Pricing ────────────────────────────────────────────────────────────
-
-elif page == "Pricing":
-    st.title("🎯 Dynamic Pricing Recommendations")
-    st.caption("Performance-Based Parking Pricing — Seattle Municipal Code 11.16.121")
-
-    st.info(
-        "Seattle SMC 11.16.121 authorizes adjusting meter rates to achieve 70–85% occupancy targets. "
-        "Rates are bounded between $0.50 and $8.00/hour. Changes require City Council approval.",
-        icon="⚖️",
-    )
-
-    if pricing.empty:
-        st.warning("No pricing recommendations. Run `python scripts/pricing_optimizer.py`.")
-        st.stop()
+    # Determine hours over/under target
+    over = region_forecast[region_forecast["predicted_occupancy"] > 0.85]
+    under = region_forecast[region_forecast["predicted_occupancy"] < 0.70]
 
     col1, col2, col3 = st.columns(3)
+    with col1:
+        kpi("Avg Predicted", f"{region_forecast['predicted_occupancy'].mean():.1%}", "Next 7 days", "kpi-neutral")
+    with col2:
+        kpi("Hours Over 85%", str(len(over)), "Rate increase window", "kpi-bad" if len(over) > 0 else "kpi-neutral")
+    with col3:
+        kpi("Hours Under 70%", str(len(under)), "Demand stimulus window", "kpi-warn" if len(under) > 0 else "kpi-neutral")
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=region_forecast["hour"], y=region_forecast["predicted_occupancy"],
+        fill="tozeroy", fillcolor="rgba(74,144,217,0.1)",
+        line=dict(color="#4a90d9", width=2),
+        name="Predicted Occupancy",
+    ))
+    if not over.empty:
+        fig.add_trace(go.Scatter(
+            x=over["hour"], y=over["predicted_occupancy"],
+            mode="markers", marker=dict(color="#e05c5c", size=6),
+            name=">85% (raise rates)",
+        ))
+    fig.add_hrect(y0=0.70, y1=0.85, fillcolor="rgba(76,175,143,0.08)", line_width=0,
+                  annotation_text="Target band", annotation_position="top left")
+    fig.add_hline(y=0.85, line_dash="dash", line_color="#e05c5c", line_width=1)
+    fig.add_hline(y=0.70, line_dash="dash", line_color="#f5a623", line_width=1)
+    fig.update_layout(
+        title=f"7-Day Occupancy Forecast — {selected_region}",
+        yaxis=dict(tickformat=".0%", range=[0, 1]),
+        height=400,
+        **PLOTLY_THEME,
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+    if not over.empty:
+        section("HIGH-DEMAND HOURS (>85%) — ACTION REQUIRED")
+        disp = (
+            over[["hour", "predicted_occupancy"]]
+            .copy()
+            .assign(
+                Date=lambda x: x["hour"].dt.strftime("%a %b %d"),
+                Hour=lambda x: x["hour"].dt.strftime("%H:00"),
+                Occupancy=lambda x: x["predicted_occupancy"].map("{:.1%}".format),
+                Action=lambda x: "Raise rate by $0.25–$0.50",
+            )
+            [["Date", "Hour", "Occupancy", "Action"]]
+        )
+        st.dataframe(disp, use_container_width=True, hide_index=True)
+
+
+# ── Page: Pricing ─────────────────────────────────────────────────────────────
+
+elif page == "🎯 Pricing":
+    st.title("Dynamic Pricing Recommendations")
+    st.caption("Seattle Municipal Code 11.16.121 — Performance-Based Parking Pricing")
+
+    st.markdown("""
+    <div style="background:#1a2035;border:1px solid #2a3550;border-radius:10px;
+                padding:14px 20px;margin-bottom:20px;font-size:13px;color:#c8d0e8;">
+        <b>⚖️ Legal authority:</b> SMC 11.16.121 authorizes meter rate adjustments to achieve
+        70–85% occupancy. Rate bounds: <b>$0.50–$8.00/hour</b>.
+        Rate changes require City Council approval.
+    </div>
+    """, unsafe_allow_html=True)
+
+    if pricing.empty:
+        st.error("No pricing recommendations. Run `python scripts/pricing_optimizer.py`.")
+        st.stop()
+
     increases = (pricing["action"] == "increase").sum()
     decreases = (pricing["action"] == "decrease").sum()
     holds = (pricing["action"] == "hold").sum()
-    col1.metric("Rate Increases Recommended", increases, help="Drive away excess demand")
-    col2.metric("Rate Decreases Recommended", decreases, help="Stimulate under-utilized zones")
-    col3.metric("No Change", holds)
 
-    st.divider()
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        kpi("Rate Increases", str(increases), "Zones over 85%", "kpi-bad" if increases > 0 else "kpi-neutral")
+    with col2:
+        kpi("Rate Decreases", str(decreases), "Zones under 70%", "kpi-blue" if decreases > 0 else "kpi-neutral")
+    with col3:
+        kpi("No Change", str(holds), "In target band", "kpi-good")
+    with col4:
+        rev_impact = pricing["revenue_delta"].sum() if "revenue_delta" in pricing.columns else 0
+        kpi("Total Rev. Impact", f"${rev_impact:+,.0f}/hr",
+            "If all changes applied", "kpi-good" if rev_impact >= 0 else "kpi-warn")
 
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # Rate change waterfall by region
+    if "revenue_delta" in pricing.columns:
+        section("REVENUE IMPACT BY REGION")
+        region_impact = (
+            pricing.groupby("region")["revenue_delta"]
+            .sum()
+            .sort_values(ascending=False)
+            .reset_index()
+        )
+        colors = ["#4caf8f" if v >= 0 else "#e05c5c" for v in region_impact["revenue_delta"]]
+        fig = go.Figure(go.Bar(
+            x=region_impact["region"],
+            y=region_impact["revenue_delta"],
+            marker_color=colors,
+            text=region_impact["revenue_delta"].map("${:+,.0f}".format),
+            textposition="outside",
+        ))
+        fig.add_hline(y=0, line_color="#7b8db0", line_width=1)
+        fig.update_layout(
+            title="Estimated Revenue Delta by Region ($/hr if all changes applied)",
+            yaxis_title="Revenue Impact ($/hr)",
+            height=320,
+            **PLOTLY_THEME,
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+    section("RECOMMENDATIONS TABLE")
     region_filter = st.selectbox("Filter by Region", ["All"] + sorted(pricing["region"].unique()))
-    disp = pricing if region_filter == "All" else pricing[pricing["region"] == region_filter]
+    action_filter = st.selectbox("Filter by Action", ["All", "increase", "decrease", "hold"])
+
+    disp = pricing.copy()
+    if region_filter != "All":
+        disp = disp[disp["region"] == region_filter]
+    if action_filter != "All":
+        disp = disp[disp["action"] == action_filter]
 
     def color_action(val):
         if val == "increase":
-            return "background-color: #fde8e8; color: #c0392b"
+            return "background-color:#3d1515;color:#e05c5c"
         if val == "decrease":
-            return "background-color: #e8f4fd; color: #2980b9"
-        return ""
+            return "background-color:#152a3d;color:#4a90d9"
+        return "color:#7b8db0"
 
     styled = disp[["region", "hour_of_day", "avg_predicted_occupancy",
                     "current_rate", "recommended_rate", "rate_change",
@@ -373,34 +704,40 @@ elif page == "Pricing":
     styled["recommended_rate"] = styled["recommended_rate"].map("${:.2f}".format)
     styled["rate_change"] = styled["rate_change"].map("${:+.2f}".format)
     styled["revenue_delta"] = styled["revenue_delta"].map("${:+.2f}".format)
-    styled.columns = ["Region", "Hour", "Pred. Occupancy", "Current Rate",
-                      "Rec. Rate", "Change", "Action", "Rev. Delta/hr"]
-
+    styled.columns = ["Region", "Hour", "Pred. Occ.", "Current Rate",
+                      "Rec. Rate", "Change", "Action", "Rev. Impact/hr"]
     st.dataframe(
         styled.style.map(color_action, subset=["Action"]),
         use_container_width=True, hide_index=True,
     )
 
-# ── Page: Infrastructure ROI ─────────────────────────────────────────────────
 
-elif page == "Infrastructure ROI":
-    st.title("🏗️ Infrastructure ROI Calculator")
-    st.caption("Should Seattle build more parking? Cost-benefit analysis by area and infrastructure type.")
+# ── Page: Infrastructure ROI ──────────────────────────────────────────────────
+
+elif page == "🏗️ Infrastructure":
+    st.title("Infrastructure Investment ROI")
+    st.caption("Cost-benefit analysis: should Seattle build more parking capacity?")
 
     if roi_df.empty:
-        st.warning("No ROI data. Run `python scripts/infrastructure_roi.py`.")
+        st.error("No ROI data. Run `python scripts/infrastructure_roi.py`.")
         st.stop()
 
-    # Summary KPIs
     viable = roi_df[roi_df["viable"]]
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Scenarios Analyzed", len(roi_df))
-    col2.metric("Viable Investments", len(viable), help="Breakeven occupancy < current occupancy")
-    col3.metric("Best ROI", f"{viable['roi_percent'].max():.1f}%" if not viable.empty else "N/A")
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        kpi("Scenarios Analyzed", str(len(roi_df)), "", "kpi-neutral")
+    with col2:
+        kpi("Viable Investments", str(len(viable)),
+            "Breakeven < current demand", "kpi-good" if len(viable) > 0 else "kpi-warn")
+    with col3:
+        best_roi = viable["roi_percent"].max() if not viable.empty else 0
+        kpi("Best ROI", f"{best_roi:.1f}%", "", "kpi-good" if best_roi > 0 else "kpi-neutral")
+    with col4:
+        best_payback = viable["payback_years"].min() if not viable.empty else 0
+        kpi("Fastest Payback", f"{best_payback:.1f} yrs" if best_payback > 0 else "N/A", "", "kpi-neutral")
 
-    st.divider()
+    st.markdown("<br>", unsafe_allow_html=True)
 
-    # Filter controls
     col1, col2 = st.columns(2)
     region_filter = col1.selectbox("Region", ["All"] + sorted(roi_df["region"].unique()))
     infra_filter = col2.selectbox("Infrastructure Type", ["All"] + sorted(roi_df["infra_type"].unique()))
@@ -411,42 +748,45 @@ elif page == "Infrastructure ROI":
     if infra_filter != "All":
         disp = disp[disp["infra_type"] == infra_filter]
 
-    # ROI chart
-    fig = px.bar(
-        disp.sort_values("roi_percent", ascending=False),
-        x="region", y="roi_percent",
-        color="infra_type",
-        barmode="group",
-        facet_col="n_new_spaces",
-        title="ROI % by Region and Infrastructure Type",
-        labels={"roi_percent": "ROI %", "region": "Region", "infra_type": "Type"},
-        height=400,
-        color_discrete_map={"surface_lot": "steelblue", "structured_garage": "darkorange"},
-    )
-    fig.add_hline(y=0, line_dash="solid", line_color="red", line_width=1)
-    st.plotly_chart(fig, use_container_width=True)
+    col_left, col_right = st.columns(2)
 
-    # Breakeven comparison
-    fig2 = px.scatter(
-        disp,
-        x="current_occupancy", y="breakeven_occupancy",
-        color="infra_type", size="n_new_spaces",
-        hover_name="region",
-        hover_data={"roi_percent": True, "payback_years": True},
-        title="Current Occupancy vs Breakeven Occupancy",
-        labels={"current_occupancy": "Current Occupancy",
-                "breakeven_occupancy": "Breakeven Occupancy"},
-        height=400,
-    )
-    fig2.add_shape(type="line", x0=0, y0=0, x1=1, y1=1,
-                   line=dict(dash="dash", color="gray"))
-    fig2.update_xaxes(tickformat=".0%")
-    fig2.update_yaxes(tickformat=".0%")
-    st.caption("Points below the diagonal line are viable (breakeven < current demand).")
-    st.plotly_chart(fig2, use_container_width=True)
+    with col_left:
+        section("ROI BY SCENARIO")
+        fig = px.bar(
+            disp.sort_values("roi_percent", ascending=False),
+            x="region", y="roi_percent", color="infra_type",
+            barmode="group", facet_col="n_new_spaces",
+            labels={"roi_percent": "ROI %", "region": "Region", "infra_type": "Type"},
+            height=380,
+            color_discrete_map={"surface_lot": "#4a90d9", "structured_garage": "#f5a623",
+                                 "underground": "#e05c5c"},
+        )
+        fig.add_hline(y=0, line_dash="solid", line_color="#e05c5c", line_width=1)
+        fig.update_layout(**PLOTLY_THEME)
+        st.plotly_chart(fig, use_container_width=True)
 
-    # Detailed table
-    st.subheader("Scenario Details")
+    with col_right:
+        section("BREAKEVEN vs CURRENT OCCUPANCY")
+        fig2 = px.scatter(
+            disp,
+            x="current_occupancy", y="breakeven_occupancy",
+            color="viable", size="n_new_spaces",
+            hover_name="region",
+            hover_data={"roi_percent": ":.1f", "payback_years": ":.1f"},
+            color_discrete_map={True: "#4caf8f", False: "#e05c5c"},
+            labels={"current_occupancy": "Current Occupancy",
+                    "breakeven_occupancy": "Breakeven Occupancy"},
+            height=380,
+        )
+        fig2.add_shape(type="line", x0=0, y0=0, x1=1, y1=1,
+                       line=dict(dash="dash", color="#7b8db0"))
+        fig2.update_xaxes(tickformat=".0%")
+        fig2.update_yaxes(tickformat=".0%")
+        fig2.update_layout(**PLOTLY_THEME)
+        st.caption("Points below diagonal line are viable (current demand > breakeven).")
+        st.plotly_chart(fig2, use_container_width=True)
+
+    section("SCENARIO DETAILS")
     table = disp[[
         "region", "infra_type", "n_new_spaces", "current_occupancy",
         "breakeven_occupancy", "total_construction_cost",
@@ -457,27 +797,27 @@ elif page == "Infrastructure ROI":
     table["total_construction_cost"] = table["total_construction_cost"].map("${:,.0f}".format)
     table["net_annual_income"] = table["net_annual_income"].map("${:+,.0f}".format)
     table["roi_percent"] = table["roi_percent"].map("{:.1f}%".format)
-    table.columns = ["Region", "Type", "Spaces", "Curr. Occ.", "Breakeven Occ.",
+    table.columns = ["Region", "Type", "Spaces", "Curr. Occ.", "Breakeven",
                      "Construction Cost", "Net Annual", "ROI %", "Payback (yrs)", "Viable"]
-    st.dataframe(table.style.map(
-        lambda v: "background-color: #e8f4fd" if v is True else
-                  ("background-color: #fde8e8" if v is False else ""),
-        subset=["Viable"]
-    ), use_container_width=True, hide_index=True)
-
-    st.caption(
-        "Construction costs: surface lot $5K/space, structured garage $45K/space "
-        "(Seattle 2024 benchmarks). Bond rate 4.5%, 20-year term, $800/space/yr operating."
+    st.dataframe(
+        table.style.map(
+            lambda v: "background-color:#153d2a" if v is True else
+                      ("background-color:#3d1515" if v is False else ""),
+            subset=["Viable"]
+        ),
+        use_container_width=True, hide_index=True,
     )
+    st.caption("Costs: surface lot $5K/space, structured garage $45K/space, underground $90K/space. Bond: 4.5%, 20yr.")
 
-# ── Page: Geo Map ────────────────────────────────────────────────────────────
 
-elif page == "Geo Map":
-    st.title("🗺️ Parking Demand Map")
-    st.caption("Average occupancy by region — circle size and color indicate demand level")
+# ── Page: Geo Map ─────────────────────────────────────────────────────────────
+
+elif page == "🗺️ Geo Map":
+    st.title("Parking Demand Map")
+    st.caption("Average occupancy by region — click markers for details")
 
     if features.empty:
-        st.warning("No data to display.")
+        st.error("No data to display.")
         st.stop()
 
     REGION_COORDS = {
@@ -494,57 +834,96 @@ elif page == "Geo Map":
         .reset_index()
     )
 
+    # Merge in pricing info if available
+    if not pricing.empty and "action" in pricing.columns:
+        top_action = (
+            pricing.groupby("region")["action"]
+            .agg(lambda x: x.value_counts().index[0])
+            .reset_index()
+            .rename(columns={"action": "top_action"})
+        )
+        region_occ = region_occ.merge(top_action, on="region", how="left")
+        region_occ["top_action"] = region_occ["top_action"].fillna("hold")
+    else:
+        region_occ["top_action"] = "hold"
+
     def occ_color(rate: float) -> str:
         if rate > 0.85:
-            return "#c0392b"   # red — over target
-        elif rate > 0.70:
-            return "#27ae60"   # green — in target band
+            return "#c0392b"
+        elif rate >= 0.70:
+            return "#27ae60"
         else:
-            return "#2980b9"   # blue — under target
+            return "#2980b9"
 
-    m = folium.Map(location=[47.615, -122.335], zoom_start=12, tiles="CartoDB positron")
+    m = folium.Map(
+        location=[47.620, -122.335],
+        zoom_start=12,
+        tiles="CartoDB dark_matter",
+    )
 
     for _, row in region_occ.iterrows():
         coords = REGION_COORDS.get(row["region"], (47.61, -122.33))
         rate = row["avg_occupancy_rate"]
-        radius = 200 + rate * 600  # 200m min, up to 800m at 100%
         color = occ_color(rate)
+        action = row["top_action"]
+        action_text = {
+            "increase": "⬆ Raise rates",
+            "decrease": "⬇ Lower rates",
+            "hold": "✓ Hold rates",
+        }.get(action, "—")
 
+        status = "Over target" if rate > 0.85 else ("On target" if rate >= 0.70 else "Under target")
+
+        popup_html = f"""
+        <div style="font-family:sans-serif;min-width:160px">
+            <b style="font-size:14px">{row['region']}</b><br>
+            <hr style="margin:4px 0">
+            <b>Occupancy:</b> {rate:.1%}<br>
+            <b>Status:</b> {status}<br>
+            <b>Pricing action:</b> {action_text}
+        </div>
+        """
         folium.CircleMarker(
             location=coords,
-            radius=radius / 20,
+            radius=10 + rate * 25,
             color=color,
             fill=True,
             fill_color=color,
-            fill_opacity=0.6,
-            popup=folium.Popup(
-                f"<b>{row['region']}</b><br>Avg Occupancy: {rate:.1%}<br>"
-                f"Target: 70–85%",
-                max_width=200,
-            ),
+            fill_opacity=0.7,
+            weight=2,
+            popup=folium.Popup(popup_html, max_width=220),
             tooltip=f"{row['region']}: {rate:.1%}",
         ).add_to(m)
 
-    # Legend
     legend_html = """
-    <div style="position:fixed;bottom:30px;left:30px;z-index:1000;background:white;
-                padding:10px 14px;border-radius:8px;border:1px solid #ccc;font-size:13px;">
-        <b>Occupancy Level</b><br>
-        <span style="color:#c0392b;">●</span> &gt;85% — Over target (raise rates)<br>
-        <span style="color:#27ae60;">●</span> 70–85% — In target band<br>
-        <span style="color:#2980b9;">●</span> &lt;70% — Under target (lower rates)
+    <div style="position:fixed;bottom:30px;left:30px;z-index:9999;
+                background:rgba(15,17,23,0.92);padding:12px 16px;
+                border-radius:10px;border:1px solid #2a3550;
+                font-family:sans-serif;font-size:12px;color:#c8d0e8;">
+        <b style="font-size:13px">Occupancy Level</b><br><br>
+        <span style="color:#c0392b;font-size:18px">●</span> &gt;85% — High demand (raise rates)<br>
+        <span style="color:#27ae60;font-size:18px">●</span> 70–85% — On target<br>
+        <span style="color:#2980b9;font-size:18px">●</span> &lt;70% — Low demand (analyze)
     </div>
     """
     m.get_root().html.add_child(folium.Element(legend_html))
 
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        st_folium(m, width=800, height=550)
-    with col2:
-        st.markdown("### Region Stats")
+    col_map, col_stats = st.columns([3, 1])
+
+    with col_map:
+        st_folium(m, width=800, height=560, returned_objects=[])
+
+    with col_stats:
+        section("REGION RANKING")
         for _, row in region_occ.sort_values("avg_occupancy_rate", ascending=False).iterrows():
             rate = row["avg_occupancy_rate"]
-            icon = "🔴" if rate > 0.85 else ("🟢" if rate > 0.70 else "🔵")
-            st.markdown(f"**{icon} {row['region']}**")
-            st.markdown(f"&nbsp;&nbsp;{rate:.1%} avg occupancy")
-            st.markdown("")
+            color = occ_color(rate)
+            status = "HIGH" if rate > 0.85 else ("TARGET" if rate >= 0.70 else "LOW")
+            st.markdown(f"""
+            <div style="background:#1a2035;border:1px solid #2a3550;border-radius:8px;
+                        padding:10px 14px;margin-bottom:8px;">
+                <div style="font-size:12px;color:#7b8db0;font-weight:600">{row['region']}</div>
+                <div style="font-size:22px;font-weight:700;color:{color}">{rate:.0%}</div>
+                <div style="font-size:10px;color:{color};font-weight:600">{status}</div>
+            </div>
+            """, unsafe_allow_html=True)
