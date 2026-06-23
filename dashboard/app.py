@@ -812,23 +812,59 @@ elif page == "🏗️ Infrastructure":
 # ── Page: Geo Map ─────────────────────────────────────────────────────────────
 
 elif page == "🗺️ Geo Map":
+    import folium
+    from streamlit_folium import st_folium
+
     st.title("Parking Demand Map")
-    st.caption("Paid meter district occupancy across Seattle — hover for details")
+    st.caption("Circle size = avg spaces in district · Color = occupancy level · Click a circle for full stats")
 
     if features.empty:
         st.error("No data to display.")
         st.stop()
 
+    # Real coordinates from OpenStreetMap Nominatim
     REGION_COORDS = {
-        "Downtown Seattle":    (47.6097, -122.3361),  # 3rd Ave & Pike St
-        "Capitol Hill":        (47.6128, -122.3206),  # Broadway & Pike St
-        "South Lake Union":    (47.6244, -122.3410),  # Westlake Ave N & Thomas St
-        "Ballard":             (47.6683, -122.3778),  # NW Market St & 22nd Ave NW
-        "Industrial District": (47.5789, -122.3298),  # 4th Ave S & S Lander St (SoDo)
+        "Downtown Seattle":      (47.6081, -122.3321),
+        "Capitol Hill":          (47.6238, -122.3184),
+        "South Lake Union":      (47.6232, -122.3384),
+        "Ballard":               (47.6765, -122.3862),
+        "International District":(47.5984, -122.3225),
     }
 
-    region_occ = features.groupby("region")["avg_occupancy_rate"].mean().reset_index()
+    # Build per-region stats
+    reg_stats = features.groupby("region").agg(
+        avg_occ=("avg_occupancy_rate", "mean"),
+        peak_occ=("peak_occupancy_rate", "mean"),
+        avg_spaces=("total_spaces", "mean"),
+        num_blockfaces=("num_blockfaces", "mean"),
+    ).reset_index()
 
+    # Peak demand hour per region
+    peak_hour = (
+        features.groupby(["region", "hour_of_day"])["avg_occupancy_rate"]
+        .mean()
+        .reset_index()
+    )
+    peak_hour = peak_hour.loc[peak_hour.groupby("region")["avg_occupancy_rate"].idxmax()]
+    peak_hour = peak_hour.rename(columns={"hour_of_day": "peak_hour", "avg_occupancy_rate": "_ph_occ"})
+    reg_stats = reg_stats.merge(peak_hour[["region", "peak_hour"]], on="region", how="left")
+
+    # Revenue per region
+    if not rev_detail.empty:
+        rev_by_region = rev_detail.groupby("region").agg(
+            current_rate=("current_rate", "mean"),
+            recommended_rate=("recommended_rate", "mean"),
+            daily_current=("current_revenue_per_hour", "sum"),
+            daily_optimized=("optimized_revenue_per_hour", "sum"),
+        ).reset_index()
+        reg_stats = reg_stats.merge(rev_by_region, on="region", how="left")
+    else:
+        reg_stats["current_rate"] = 2.00
+        reg_stats["recommended_rate"] = 2.00
+        reg_stats["daily_current"] = 0.0
+        reg_stats["daily_optimized"] = 0.0
+
+    # Pricing action
     if not pricing.empty and "action" in pricing.columns:
         top_action = (
             pricing.groupby("region")["action"]
@@ -836,98 +872,172 @@ elif page == "🗺️ Geo Map":
             .reset_index()
             .rename(columns={"action": "top_action"})
         )
-        region_occ = region_occ.merge(top_action, on="region", how="left")
-        region_occ["top_action"] = region_occ["top_action"].fillna("hold")
+        reg_stats = reg_stats.merge(top_action, on="region", how="left")
+    if "top_action" not in reg_stats.columns:
+        reg_stats["top_action"] = "hold"
     else:
-        region_occ["top_action"] = "hold"
+        reg_stats["top_action"] = reg_stats["top_action"].fillna("hold")
 
-    region_occ["lat"] = region_occ["region"].map(lambda r: REGION_COORDS.get(r, (47.61, -122.33))[0])
-    region_occ["lon"] = region_occ["region"].map(lambda r: REGION_COORDS.get(r, (47.61, -122.33))[1])
-    region_occ["occupancy_pct"] = (region_occ["avg_occupancy_rate"] * 100).round(1)
-    region_occ["status"] = region_occ["avg_occupancy_rate"].apply(
-        lambda r: "High Demand (>85%)" if r > 0.85 else ("On Target (70–85%)" if r >= 0.70 else "Underutilized (<70%)")
+    def occ_color(rate):
+        if rate > 0.85:
+            return "#e05c5c"   # red — over target
+        elif rate >= 0.70:
+            return "#4caf8f"   # green — on target
+        else:
+            return "#4a90d9"   # blue — underutilized
+
+    def occ_status(rate):
+        if rate > 0.85:
+            return "🔴 High Demand (&gt;85%)"
+        elif rate >= 0.70:
+            return "🟢 On Target (70–85%)"
+        else:
+            return "🔵 Underutilized (&lt;70%)"
+
+    action_labels = {"increase": "⬆ Raise rates", "decrease": "⬇ Lower rates", "hold": "✓ Hold rates"}
+
+    # Circle radius scaled to avg_spaces (20–60px range)
+    min_sp = reg_stats["avg_spaces"].min()
+    max_sp = reg_stats["avg_spaces"].max()
+    def space_radius(spaces):
+        if max_sp == min_sp:
+            return 35
+        return 18 + 32 * (spaces - min_sp) / (max_sp - min_sp)
+
+    m = folium.Map(
+        location=[47.630, -122.330],
+        zoom_start=12,
+        tiles="CartoDB dark_matter",
+        prefer_canvas=True,
     )
-    region_occ["color"] = region_occ["avg_occupancy_rate"].apply(
-        lambda r: "#e05c5c" if r > 0.85 else ("#4caf8f" if r >= 0.70 else "#4a90d9")
-    )
-    region_occ["action_label"] = region_occ["top_action"].map(
-        {"increase": "⬆ Raise rates", "decrease": "⬇ Lower rates", "hold": "✓ Hold rates"}
-    ).fillna("✓ Hold rates")
 
-    fig = go.Figure()
+    for _, row in reg_stats.iterrows():
+        coords = REGION_COORDS.get(row["region"])
+        if not coords:
+            continue
 
-    # Outer glow ring
-    fig.add_trace(go.Scattermap(
-        lat=region_occ["lat"],
-        lon=region_occ["lon"],
-        mode="markers",
-        marker=dict(
-            size=region_occ["occupancy_pct"] * 0.7 + 30,
-            color=region_occ["color"],
-            opacity=0.2,
-        ),
-        hoverinfo="skip",
-        showlegend=False,
-    ))
+        color = occ_color(row["avg_occ"])
+        radius = space_radius(row["avg_spaces"])
+        action = row["top_action"]
+        peak_h = int(row["peak_hour"]) if pd.notna(row.get("peak_hour")) else 0
+        peak_label = f"{peak_h % 12 or 12}{'am' if peak_h < 12 else 'pm'}"
 
-    # Main markers
-    fig.add_trace(go.Scattermap(
-        lat=region_occ["lat"],
-        lon=region_occ["lon"],
-        mode="markers+text",
-        marker=dict(
-            size=region_occ["occupancy_pct"] * 0.5 + 20,
-            color=region_occ["color"],
+        popup_html = f"""
+        <div style="font-family:Arial,sans-serif;min-width:220px;background:#12172b;color:#c8d0e8;
+                    border-radius:8px;padding:14px;border:1px solid {color}55">
+            <div style="font-size:14px;font-weight:700;color:{color};margin-bottom:10px;
+                        border-bottom:1px solid {color}44;padding-bottom:6px">
+                {row['region']}
+            </div>
+            <table style="width:100%;border-collapse:collapse;font-size:12px">
+                <tr>
+                    <td style="color:#7b8db0;padding:3px 0">Avg Occupancy</td>
+                    <td style="text-align:right;font-weight:600;color:{color}">{row['avg_occ']:.0%}</td>
+                </tr>
+                <tr>
+                    <td style="color:#7b8db0;padding:3px 0">Peak Occupancy</td>
+                    <td style="text-align:right;font-weight:600;color:#c8d0e8">{row['peak_occ']:.0%}</td>
+                </tr>
+                <tr>
+                    <td style="color:#7b8db0;padding:3px 0">Peak Hour</td>
+                    <td style="text-align:right;font-weight:600;color:#c8d0e8">{peak_label}</td>
+                </tr>
+                <tr>
+                    <td style="color:#7b8db0;padding:3px 0">Avg Spaces</td>
+                    <td style="text-align:right;font-weight:600;color:#c8d0e8">{int(row['avg_spaces']):,}</td>
+                </tr>
+                <tr>
+                    <td style="color:#7b8db0;padding:3px 0">Blockfaces</td>
+                    <td style="text-align:right;font-weight:600;color:#c8d0e8">{int(row['num_blockfaces'])}</td>
+                </tr>
+                <tr style="border-top:1px solid #2a3550;margin-top:4px">
+                    <td style="color:#7b8db0;padding:5px 0 3px">Current Rate</td>
+                    <td style="text-align:right;font-weight:600;color:#c8d0e8">${row.get('current_rate', 0):.2f}/hr</td>
+                </tr>
+                <tr>
+                    <td style="color:#7b8db0;padding:3px 0">Recommended</td>
+                    <td style="text-align:right;font-weight:600;color:{color}">${row.get('recommended_rate', 0):.2f}/hr</td>
+                </tr>
+                <tr>
+                    <td style="color:#7b8db0;padding:3px 0">Pricing Action</td>
+                    <td style="text-align:right;font-weight:600;color:{color}">{action_labels.get(action, action)}</td>
+                </tr>
+            </table>
+            <div style="margin-top:8px;padding:5px 8px;background:{color}22;border-radius:4px;
+                        font-size:11px;color:{color};font-weight:600;text-align:center">
+                {occ_status(row['avg_occ'])}
+            </div>
+        </div>
+        """
+
+        tooltip_html = (
+            f"<b style='color:{color}'>{row['region']}</b><br>"
+            f"Occupancy: <b>{row['avg_occ']:.0%}</b><br>"
+            f"Spaces: {int(row['avg_spaces']):,} · Peak: {peak_label}"
+        )
+
+        # Outer glow ring
+        folium.CircleMarker(
+            location=coords,
+            radius=radius + 12,
+            color=color,
+            fill=True,
+            fill_color=color,
+            fill_opacity=0.08,
+            weight=1,
+            opacity=0.3,
+        ).add_to(m)
+
+        # Main circle with popup + tooltip
+        folium.CircleMarker(
+            location=coords,
+            radius=radius,
+            color=color,
+            fill=True,
+            fill_color=color,
+            fill_opacity=0.55,
+            weight=2,
             opacity=0.9,
-        ),
-        text=region_occ["region"] + "<br>" + region_occ["occupancy_pct"].map("{:.0f}%".format),
-        textposition="bottom center",
-        textfont=dict(color="white", size=11),
-        customdata=np.stack([
-            region_occ["region"],
-            region_occ["occupancy_pct"],
-            region_occ["status"],
-            region_occ["action_label"],
-        ], axis=-1),
-        hovertemplate=(
-            "<b>%{customdata[0]}</b><br>"
-            "Occupancy: %{customdata[1]:.0f}%<br>"
-            "Status: %{customdata[2]}<br>"
-            "Action: %{customdata[3]}"
-            "<extra></extra>"
-        ),
-        showlegend=False,
-    ))
+            popup=folium.Popup(popup_html, max_width=260),
+            tooltip=folium.Tooltip(tooltip_html, sticky=False),
+        ).add_to(m)
 
-    fig.update_layout(
-        map=dict(
-            style="carto-darkmatter",
-            center=dict(lat=47.625, lon=-122.340),
-            zoom=10.5,
-        ),
-        margin=dict(l=0, r=0, t=0, b=0),
-        height=560,
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)",
-    )
+        # Label in center of circle
+        folium.Marker(
+            location=coords,
+            icon=folium.DivIcon(
+                html=f"""<div style="font-family:Arial,sans-serif;font-size:11px;font-weight:700;
+                                     color:white;text-align:center;width:80px;margin-left:-40px;
+                                     text-shadow:0 1px 3px rgba(0,0,0,0.9)">
+                            {row['avg_occ']:.0%}
+                         </div>""",
+                icon_size=(80, 20),
+                icon_anchor=(40, 10),
+            ),
+        ).add_to(m)
 
-    st.plotly_chart(fig, use_container_width=True)
+    st_folium(m, use_container_width=True, height=540, returned_objects=[])
 
     st.markdown("<br>", unsafe_allow_html=True)
     section("REGION BREAKDOWN")
-    cols = st.columns(len(region_occ))
-    for i, (_, row) in enumerate(region_occ.sort_values("avg_occupancy_rate", ascending=False).iterrows()):
-        rate = row["avg_occupancy_rate"]
-        color = row["color"]
+    cols = st.columns(len(reg_stats))
+    for i, (_, row) in enumerate(reg_stats.sort_values("avg_occ", ascending=False).iterrows()):
+        rate = row["avg_occ"]
+        color = occ_color(rate)
         status = "HIGH DEMAND" if rate > 0.85 else ("ON TARGET" if rate >= 0.70 else "UNDERUTILIZED")
-        action_icon = {"increase": "⬆", "decrease": "⬇", "hold": "→"}.get(row["top_action"], "→")
+        action = row["top_action"]
+        action_icon = {"increase": "⬆", "decrease": "⬇", "hold": "→"}.get(action, "→")
+        peak_h = int(row["peak_hour"]) if pd.notna(row.get("peak_hour")) else 0
+        peak_label = f"{peak_h % 12 or 12}{'am' if peak_h < 12 else 'pm'}"
         with cols[i]:
             st.markdown(f"""
             <div style="background:#1a2035;border:1px solid {color}40;border-top:3px solid {color};
                         border-radius:8px;padding:14px 16px;text-align:center">
-                <div style="font-size:11px;color:#7b8db0;font-weight:600;letter-spacing:.05em">{row['region'].upper()}</div>
-                <div style="font-size:30px;font-weight:700;color:{color};margin:6px 0">{rate:.0%}</div>
+                <div style="font-size:10px;color:#7b8db0;font-weight:600;letter-spacing:.05em;margin-bottom:4px">{row['region'].upper()}</div>
+                <div style="font-size:28px;font-weight:700;color:{color};margin:4px 0">{rate:.0%}</div>
                 <div style="font-size:10px;color:{color};font-weight:600">{status}</div>
-                <div style="font-size:11px;color:#7b8db0;margin-top:4px">{action_icon} {row['top_action']}</div>
+                <div style="font-size:11px;color:#7b8db0;margin-top:6px">{int(row['avg_spaces']):,} spaces</div>
+                <div style="font-size:11px;color:#7b8db0">Peak: {peak_label}</div>
+                <div style="font-size:11px;color:{color};margin-top:4px">{action_icon} {action}</div>
             </div>
             """, unsafe_allow_html=True)

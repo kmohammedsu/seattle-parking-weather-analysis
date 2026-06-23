@@ -15,8 +15,8 @@ HOLIDAYS_FILE = DATA_DIR / "seattle_holidays.csv"
 OUTPUT_FILE   = DATA_DIR / "features.csv"
 
 VENUE_REGION = {
-    "Lumen Field":          "Industrial District",
-    "T-Mobile Park":        "Industrial District",
+    "Lumen Field":          "International District",
+    "T-Mobile Park":        "International District",
     "Climate Pledge Arena": "South Lake Union",
 }
 
@@ -29,21 +29,21 @@ BLOCKFACE_RULES = [
     ("BALLARD AVE",  "Ballard"),
     ("LEARY AVE",    "Ballard"),
     ("NW MARKET",    "Ballard"),
-    # Industrial District / SoDo: S-suffix streets south of downtown
-    (" AVE S ",      "Industrial District"),
-    (" AVE S B",     "Industrial District"),
-    ("1ST AVE S",    "Industrial District"),
-    ("2ND AVE S",    "Industrial District"),
-    ("3RD AVE S",    "Industrial District"),
-    ("4TH AVE S",    "Industrial District"),
-    ("5TH AVE S",    "Industrial District"),
-    ("6TH AVE S",    "Industrial District"),
-    ("S KING ST",    "Industrial District"),
-    ("S JACKSON",    "Industrial District"),
-    ("S ROYAL",      "Industrial District"),
-    ("S ATLANTIC",   "Industrial District"),
-    ("S LANDER",     "Industrial District"),
-    ("S WELLER",     "Industrial District"),
+    # International District / SoDo: S-suffix streets south of downtown
+    (" AVE S ",      "International District"),
+    (" AVE S B",     "International District"),
+    ("1ST AVE S",    "International District"),
+    ("2ND AVE S",    "International District"),
+    ("3RD AVE S",    "International District"),
+    ("4TH AVE S",    "International District"),
+    ("5TH AVE S",    "International District"),
+    ("6TH AVE S",    "International District"),
+    ("S KING ST",    "International District"),
+    ("S JACKSON",    "International District"),
+    ("S ROYAL",      "International District"),
+    ("S ATLANTIC",   "International District"),
+    ("S LANDER",     "International District"),
+    ("S WELLER",     "International District"),
     # Capitol Hill: E-prefix cross streets and Broadway/numbered avenues
     ("E PIKE ST",    "Capitol Hill"),
     ("E PINE ST",    "Capitol Hill"),

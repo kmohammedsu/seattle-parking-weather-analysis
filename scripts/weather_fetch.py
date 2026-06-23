@@ -14,7 +14,7 @@ SEATTLE_REGIONS = {
     "South Lake Union":   {"latitude": 47.6235, "longitude": -122.3381},
     "Capitol Hill":       {"latitude": 47.6219, "longitude": -122.3194},
     "Ballard":            {"latitude": 47.6686, "longitude": -122.3867},
-    "Industrial District":{"latitude": 47.5868, "longitude": -122.3331},
+    "International District":{"latitude": 47.5868, "longitude": -122.3331},
 }
 
 BASE_URL = "https://archive-api.open-meteo.com/v1/archive"

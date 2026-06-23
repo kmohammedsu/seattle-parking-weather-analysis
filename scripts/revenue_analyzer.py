@@ -31,7 +31,7 @@ BASE_RATES = {
     "Capitol Hill":        2.00,
     "South Lake Union":    2.00,
     "Ballard":             1.50,
-    "Industrial District": 1.50,
+    "International District": 1.50,
 }
 
 
