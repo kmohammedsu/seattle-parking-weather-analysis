@@ -35,8 +35,9 @@ YEAR_DATASETS = {
     2025: "7c2e-uany",
 }
 
-# Each year-dataset only contains that year's data — no WHERE clause needed
-SOQL_QUERY = """
+# Fetch one month at a time — a full year has ~1.86M grouped rows which exceeds
+# reasonable limits. Each month has ~155K rows (well within 500K limit).
+SOQL_MONTH_QUERY = """
 SELECT
   date_trunc_ymd(occupancydatetime) AS occupancy_date,
   date_extract_hh(occupancydatetime) AS occupancy_hour,
@@ -45,6 +46,7 @@ SELECT
   max(paidoccupancy) AS peak_occupied,
   avg(parkingspacecount) AS avg_spaces,
   count(*) AS num_readings
+WHERE occupancydatetime >= '{since}' AND occupancydatetime < '{until}'
 GROUP BY occupancy_date, occupancy_hour, blockfacename
 ORDER BY occupancy_date ASC, occupancy_hour ASC
 LIMIT 500000
@@ -52,35 +54,41 @@ LIMIT 500000
 
 
 def load_progress() -> set:
+    """Returns set of completed 'YYYY-MM' month strings."""
     if PROGRESS_FILE.exists():
-        return set(json.loads(PROGRESS_FILE.read_text()).get("completed_years", []))
+        data = json.loads(PROGRESS_FILE.read_text())
+        # Support old format (list of years as ints)
+        completed = data.get("completed_months", data.get("completed_years", []))
+        return set(str(x) for x in completed)
     return set()
 
 
 def save_progress(completed: set):
-    PROGRESS_FILE.write_text(json.dumps({"completed_years": sorted(completed)}, indent=2))
+    PROGRESS_FILE.write_text(json.dumps({"completed_months": sorted(completed)}, indent=2))
 
 
-def fetch_year(year: int) -> pd.DataFrame:
+def fetch_month(year: int, month: int) -> pd.DataFrame:
+    from calendar import monthrange
     dataset_id = YEAR_DATASETS[year]
     url = BASE_URL.format(dataset_id=dataset_id)
+    last_day = monthrange(year, month)[1]
+    since = f"{year}-{month:02d}-01T00:00:00"
+    # Next month start for exclusive upper bound
+    if month == 12:
+        until = f"{year + 1}-01-01T00:00:00"
+    else:
+        until = f"{year}-{month + 1:02d}-01T00:00:00"
 
-    print(f"  Querying {year} (dataset {dataset_id})...")
+    query = SOQL_MONTH_QUERY.format(since=since, until=until)
     try:
-        resp = requests.get(url, params={"$query": SOQL_QUERY}, timeout=TIMEOUT)
+        resp = requests.get(url, params={"$query": query}, timeout=TIMEOUT)
         resp.raise_for_status()
         records = resp.json()
     except requests.RequestException as e:
-        print(f"  FAILED {year}: {e}")
+        print(f"    FAILED {year}-{month:02d}: {e}")
         return pd.DataFrame()
 
-    if not records:
-        print(f"  {year}: 0 records returned")
-        return pd.DataFrame()
-
-    df = pd.DataFrame(records)
-    print(f"  {year}: {len(df):,} hourly block summaries")
-    return df
+    return pd.DataFrame(records) if records else pd.DataFrame()
 
 
 def clean(df: pd.DataFrame) -> pd.DataFrame:
@@ -100,37 +108,50 @@ def clean(df: pd.DataFrame) -> pd.DataFrame:
 def run():
     DATA_DIR.mkdir(exist_ok=True)
     completed = load_progress()
-    remaining = [y for y in YEAR_DATASETS if y not in completed]
+
+    # Build list of all year-month pairs to fetch
+    today = date.today()
+    all_months = [
+        (y, m)
+        for y in YEAR_DATASETS
+        for m in range(1, 13)
+        if date(y, m, 1) <= today
+    ]
+    remaining = [(y, m) for y, m in all_months if f"{y}-{m:02d}" not in completed]
 
     if not remaining:
         print("Backfill already complete.")
         return
 
-    print(f"Backfill: {len(remaining)} years to fetch — {remaining}")
-    print("This will take several minutes. Progress is saved per year.\n")
+    years_remaining = sorted(set(y for y, _ in remaining))
+    print(f"Backfill: {len(remaining)} months across years {years_remaining}")
+    print("Saves after every month — safe to interrupt.\n")
 
-    for year in remaining:
-        df = fetch_year(year)
+    for year, month in remaining:
+        key = f"{year}-{month:02d}"
+        print(f"  Fetching {key}...")
+        df = fetch_month(year, month)
+
         if not df.empty:
             df = clean(df)
-            # Save after each year — safe to interrupt and resume
+            # Append to existing CSV incrementally
             if OUTPUT_FILE.exists():
                 existing = pd.read_csv(OUTPUT_FILE, parse_dates=["occupancy_date"])
                 df = pd.concat([existing, df]).drop_duplicates(
                     subset=["occupancy_date", "occupancy_hour", "blockfacename"]
                 ).sort_values(["occupancy_date", "occupancy_hour", "blockfacename"])
             df.to_csv(OUTPUT_FILE, index=False)
-            print(f"  Saved {year}: {len(df):,} total rows in {OUTPUT_FILE.name}")
-            completed.add(year)
-            save_progress(completed)
+            row_count = len(df)
+            print(f"    {key}: {len(df):,} rows | total: {row_count:,}")
         else:
-            print(f"  Skipping {year} (no data)")
-            completed.add(year)
-            save_progress(completed)
-        time.sleep(1)  # be polite to Socrata
+            print(f"    {key}: no data")
+
+        completed.add(key)
+        save_progress(completed)
+        time.sleep(0.5)  # be polite to Socrata
 
     total = pd.read_csv(OUTPUT_FILE).shape[0] if OUTPUT_FILE.exists() else 0
-    print(f"\nBackfill complete. {total:,} total rows in {OUTPUT_FILE.name}")
+    print(f"\nBackfill complete. {total:,} total rows → {OUTPUT_FILE.name}")
     print("Next: run aggregate_features.py to rebuild the feature matrix.")
 
 
