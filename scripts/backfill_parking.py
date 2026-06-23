@@ -109,13 +109,18 @@ def run():
     print(f"Backfill: {len(remaining)} years to fetch — {remaining}")
     print("This will take several minutes. Progress is saved per year.\n")
 
-    all_new = []
-
     for year in remaining:
         df = fetch_year(year)
         if not df.empty:
             df = clean(df)
-            all_new.append(df)
+            # Save after each year — safe to interrupt and resume
+            if OUTPUT_FILE.exists():
+                existing = pd.read_csv(OUTPUT_FILE, parse_dates=["occupancy_date"])
+                df = pd.concat([existing, df]).drop_duplicates(
+                    subset=["occupancy_date", "occupancy_hour", "blockfacename"]
+                ).sort_values(["occupancy_date", "occupancy_hour", "blockfacename"])
+            df.to_csv(OUTPUT_FILE, index=False)
+            print(f"  Saved {year}: {len(df):,} total rows in {OUTPUT_FILE.name}")
             completed.add(year)
             save_progress(completed)
         else:
@@ -124,25 +129,9 @@ def run():
             save_progress(completed)
         time.sleep(1)  # be polite to Socrata
 
-    if not all_new:
-        print("No data fetched.")
-        return
-
-    new_data = pd.concat(all_new, ignore_index=True)
-    print(f"\nFetched {len(new_data):,} total new rows across {len(remaining)} years")
-
-    if OUTPUT_FILE.exists():
-        existing = pd.read_csv(OUTPUT_FILE, parse_dates=["occupancy_date"])
-        print(f"Existing file: {len(existing):,} rows")
-        combined = pd.concat([existing, new_data]).drop_duplicates(
-            subset=["occupancy_date", "occupancy_hour", "blockfacename"]
-        ).sort_values(["occupancy_date", "occupancy_hour", "blockfacename"])
-    else:
-        combined = new_data.sort_values(["occupancy_date", "occupancy_hour", "blockfacename"])
-
-    combined.to_csv(OUTPUT_FILE, index=False)
-    print(f"Saved: {len(combined):,} total rows → {OUTPUT_FILE}")
-    print("\nNext: run aggregate_features.py to rebuild the feature matrix.")
+    total = pd.read_csv(OUTPUT_FILE).shape[0] if OUTPUT_FILE.exists() else 0
+    print(f"\nBackfill complete. {total:,} total rows in {OUTPUT_FILE.name}")
+    print("Next: run aggregate_features.py to rebuild the feature matrix.")
 
 
 if __name__ == "__main__":

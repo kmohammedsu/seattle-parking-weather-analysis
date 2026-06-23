@@ -38,10 +38,14 @@ jobs:
           TICKETMASTER_API_KEY: ${{ secrets.TICKETMASTER_API_KEY }}
         run: python run_pipeline.py
 
-      - name: Commit updated features and state
+      - name: Commit updated data and model artifacts
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add data/features.csv last_run.json logs/pipeline.log || true
+          git add data/features.csv data/pricing_recommendations.csv \
+                  data/revenue_summary.csv data/revenue_by_region_hour.csv \
+                  last_run.json logs/pipeline.log \
+                  models/performance/final_model_performance.csv \
+                  models/feature_columns.json || true
           git diff --cached --quiet || git commit -m "chore: daily pipeline update $(date -u +%Y-%m-%d)"
           git push
