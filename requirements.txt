@@ -13,6 +13,7 @@ matplotlib>=3.7
 seaborn>=0.12
 folium>=0.14
 plotly>=5.15
+streamlit-folium>=0.18
 
 # Dashboard
 streamlit>=1.28
