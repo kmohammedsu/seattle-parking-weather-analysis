@@ -19,12 +19,23 @@ DATA_DIR = ROOT / "data"
 OUTPUT_FILE = DATA_DIR / "live_parking_occupancy.csv"
 PROGRESS_FILE = DATA_DIR / "backfill_progress.json"
 
-SOCRATA_URL = "https://data.seattle.gov/resource/rke9-rsvs.json"
 TIMEOUT = 120
+BASE_URL = "https://data.seattle.gov/resource/{dataset_id}.json"
 
-# Yearly batches — Socrata handles full-year aggregation fine
-BACKFILL_YEARS = list(range(2012, 2026))
+# Each year is a separate Socrata dataset on Seattle Open Data.
+# 2012-2017 are archived as file-only (not queryable via API) — start from 2018.
+YEAR_DATASETS = {
+    2018: "6yaw-2m8q",
+    2019: "qktt-2bsy",
+    2020: "wtpb-jp8d",
+    2021: "jb6y-98nr",
+    2022: "bwk6-iycu",
+    2023: "3uar-q5py",
+    2024: "snbb-v8b9",
+    2025: "7c2e-uany",
+}
 
+# Each year-dataset only contains that year's data — no WHERE clause needed
 SOQL_QUERY = """
 SELECT
   date_trunc_ymd(occupancydatetime) AS occupancy_date,
@@ -34,7 +45,6 @@ SELECT
   max(paidoccupancy) AS peak_occupied,
   avg(parkingspacecount) AS avg_spaces,
   count(*) AS num_readings
-WHERE occupancydatetime >= '{since}' AND occupancydatetime <= '{until}'
 GROUP BY occupancy_date, occupancy_hour, blockfacename
 ORDER BY occupancy_date ASC, occupancy_hour ASC
 LIMIT 500000
@@ -52,13 +62,12 @@ def save_progress(completed: set):
 
 
 def fetch_year(year: int) -> pd.DataFrame:
-    since = f"{year}-01-01"
-    until = f"{year}-12-31"
-    query = SOQL_QUERY.format(since=since, until=until)
+    dataset_id = YEAR_DATASETS[year]
+    url = BASE_URL.format(dataset_id=dataset_id)
 
-    print(f"  Querying {year} ({since} → {until})...")
+    print(f"  Querying {year} (dataset {dataset_id})...")
     try:
-        resp = requests.get(SOCRATA_URL, params={"$query": query}, timeout=TIMEOUT)
+        resp = requests.get(url, params={"$query": SOQL_QUERY}, timeout=TIMEOUT)
         resp.raise_for_status()
         records = resp.json()
     except requests.RequestException as e:
@@ -91,7 +100,7 @@ def clean(df: pd.DataFrame) -> pd.DataFrame:
 def run():
     DATA_DIR.mkdir(exist_ok=True)
     completed = load_progress()
-    remaining = [y for y in BACKFILL_YEARS if y not in completed]
+    remaining = [y for y in YEAR_DATASETS if y not in completed]
 
     if not remaining:
         print("Backfill already complete.")

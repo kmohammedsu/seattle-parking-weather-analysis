@@ -55,6 +55,10 @@ def main():
     # Step 3 — Train model on latest feature window
     results["train"]          = run_step("Train model",             "train_model")
 
+    # Step 4 — Revenue intelligence
+    results["pricing"]        = run_step("Pricing recommendations", "pricing_optimizer")
+    results["revenue"]        = run_step("Revenue analysis",        "revenue_analyzer")
+
     # Summary
     log("-" * 60)
     passed = sum(v for v in results.values())
