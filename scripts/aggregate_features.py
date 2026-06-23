@@ -44,8 +44,9 @@ def load_parking() -> pd.DataFrame:
     if not PARKING_FILE.exists():
         print("  No live parking data yet — skipping")
         return pd.DataFrame()
-    df = pd.read_csv(PARKING_FILE, parse_dates=["occupancydatetime"])
-    df["hour"] = df["occupancydatetime"].dt.floor("h")
+    df = pd.read_csv(PARKING_FILE, parse_dates=["occupancy_date"])
+    # Reconstruct hourly timestamp from date + hour columns
+    df["hour"] = df["occupancy_date"] + pd.to_timedelta(df["occupancy_hour"], unit="h")
     df["region"] = map_blockface_to_region(df["blockfacename"])
     return df
 
@@ -55,9 +56,9 @@ def aggregate_parking(df: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame()
     agg = df.groupby(["hour", "region"]).agg(
         avg_occupancy_rate=("occupancy_rate", "mean"),
-        peak_occupancy_rate=("occupancy_rate", "max"),
-        total_spaces=("parkingspacecount", "sum"),
-        total_occupied=("paidoccupancy", "sum"),
+        peak_occupancy_rate=("peak_occupancy_rate", "max"),
+        total_spaces=("avg_spaces", "sum"),
+        total_occupied=("avg_occupied", "sum"),
         num_blockfaces=("blockfacename", "nunique"),
     ).reset_index()
     agg["turnover_proxy"] = agg["total_occupied"] / agg["total_spaces"].replace(0, np.nan)

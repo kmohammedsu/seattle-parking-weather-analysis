@@ -35,7 +35,8 @@ def fetch_permits(since: str) -> pd.DataFrame:
         "$order": "event_start_date ASC",
     }
     if since:
-        params["$where"] = f"event_start_date > '{since}'"
+        since_iso = str(since).replace(" ", "T")
+        params["$where"] = f"event_start_date > '{since_iso}'"
 
     try:
         resp = requests.get(SOCRATA_URL, params=params, timeout=TIMEOUT)

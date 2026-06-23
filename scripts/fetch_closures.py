@@ -34,7 +34,8 @@ def fetch_closures(since: str) -> pd.DataFrame:
         "$order": "start_date ASC",
     }
     if since:
-        params["$where"] = f"start_date > '{since}'"
+        since_iso = str(since).replace(" ", "T")
+        params["$where"] = f"start_date > '{since_iso}'"
 
     try:
         resp = requests.get(SOCRATA_URL, params=params, timeout=TIMEOUT)
