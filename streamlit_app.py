@@ -1,7 +1,4 @@
-# Streamlit Cloud entry point — delegates to dashboard/app.py
-import runpy
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).parent))
-runpy.run_path(str(Path(__file__).parent / "dashboard" / "app.py"), run_name="__main__")
+# Streamlit Cloud entry point
+# Streamlit Cloud looks for streamlit_app.py at the repo root by default.
+# This file re-exports the dashboard so we don't duplicate code.
+exec(open("dashboard/app.py").read())

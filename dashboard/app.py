@@ -88,9 +88,8 @@ def load_perf():
 
 # ── Sidebar ──────────────────────────────────────────────────────────────────
 
-st.sidebar.image("https://www.seattle.gov/images/Departments/IT/CityofSeattleLogo.png",
-                 width=160, use_container_width=False)
-st.sidebar.title("Seattle Parking\nIntelligence")
+st.sidebar.markdown("## 🏙️ City of Seattle")
+st.sidebar.title("Parking Intelligence")
 st.sidebar.caption("Revenue Optimization Platform")
 
 page = st.sidebar.radio(
