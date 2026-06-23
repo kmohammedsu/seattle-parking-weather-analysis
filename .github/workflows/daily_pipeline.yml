@@ -1,0 +1,47 @@
+name: Daily Data Pipeline
+
+on:
+  schedule:
+    - cron: "0 8 * * *"   # 8 AM UTC = midnight Seattle time
+  workflow_dispatch:        # allow manual trigger from GitHub UI
+
+jobs:
+  pipeline:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Restore pipeline state
+        run: |
+          if [ -f last_run.json ]; then
+            echo "Resuming from last_run.json"
+            cat last_run.json
+          else
+            echo "First run — no state file"
+          fi
+
+      - name: Run pipeline
+        env:
+          TICKETMASTER_API_KEY: ${{ secrets.TICKETMASTER_API_KEY }}
+        run: python run_pipeline.py
+
+      - name: Commit updated features and state
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/features.csv last_run.json logs/pipeline.log || true
+          git diff --cached --quiet || git commit -m "chore: daily pipeline update $(date -u +%Y-%m-%d)"
+          git push
