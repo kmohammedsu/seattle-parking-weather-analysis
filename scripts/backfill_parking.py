@@ -19,7 +19,7 @@ DATA_DIR = ROOT / "data"
 OUTPUT_FILE = DATA_DIR / "live_parking_occupancy.csv"
 PROGRESS_FILE = DATA_DIR / "backfill_progress.json"
 
-TIMEOUT = 120
+TIMEOUT = 300  # Socrata GROUP BY on monthly data takes ~2.5 min
 BASE_URL = "https://data.seattle.gov/resource/{dataset_id}.json"
 
 # Each year is a separate Socrata dataset on Seattle Open Data.
@@ -134,20 +134,19 @@ def run():
 
         if not df.empty:
             df = clean(df)
-            # Append to existing CSV incrementally
             if OUTPUT_FILE.exists():
                 existing = pd.read_csv(OUTPUT_FILE, parse_dates=["occupancy_date"])
                 df = pd.concat([existing, df]).drop_duplicates(
                     subset=["occupancy_date", "occupancy_hour", "blockfacename"]
                 ).sort_values(["occupancy_date", "occupancy_hour", "blockfacename"])
             df.to_csv(OUTPUT_FILE, index=False)
-            row_count = len(df)
-            print(f"    {key}: {len(df):,} rows | total: {row_count:,}")
+            print(f"    {key}: {len(df):,} total rows saved")
+            completed.add(key)
+            save_progress(completed)
         else:
-            print(f"    {key}: no data")
-
-        completed.add(key)
-        save_progress(completed)
+            # Only skip permanently if it's a month that clearly has no data
+            # (not a timeout — timeouts print FAILED and return empty too)
+            print(f"    {key}: no data (skipping)")
         time.sleep(0.5)  # be polite to Socrata
 
     total = pd.read_csv(OUTPUT_FILE).shape[0] if OUTPUT_FILE.exists() else 0
