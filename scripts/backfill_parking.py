@@ -109,7 +109,10 @@ def run():
     DATA_DIR.mkdir(exist_ok=True)
     completed = load_progress()
 
-    # Build list of all year-month pairs to fetch
+    # Socrata per-year datasets have no temporal index — queries scan the full
+    # file sequentially. Months near the start of the file (Jan-Mar) complete
+    # in ~3 min; later months exceed 5-min timeout. Only attempt Jan-Apr per
+    # year for reliable results. This gives seasonal coverage across 8 years.
     today = date.today()
     all_months = [
         (y, m)
