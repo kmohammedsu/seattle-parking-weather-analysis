@@ -821,11 +821,11 @@ elif page == "🗺️ Geo Map":
         st.stop()
 
     REGION_COORDS = {
-        "Downtown Seattle":    (47.6080, -122.3360),
-        "Capitol Hill":        (47.6230, -122.3198),
-        "South Lake Union":    (47.6270, -122.3367),
-        "Ballard":             (47.6683, -122.3843),
-        "Industrial District": (47.5804, -122.3292),
+        "Downtown Seattle":    (47.6097, -122.3361),  # 3rd Ave & Pike St
+        "Capitol Hill":        (47.6128, -122.3206),  # Broadway & Pike St
+        "South Lake Union":    (47.6244, -122.3410),  # Westlake Ave N & Thomas St
+        "Ballard":             (47.6683, -122.3778),  # NW Market St & 22nd Ave NW
+        "Industrial District": (47.5789, -122.3298),  # 4th Ave S & S Lander St (SoDo)
     }
 
     region_occ = features.groupby("region")["avg_occupancy_rate"].mean().reset_index()
@@ -903,8 +903,8 @@ elif page == "🗺️ Geo Map":
     fig.update_layout(
         map=dict(
             style="carto-darkmatter",
-            center=dict(lat=47.630, lon=-122.340),
-            zoom=11,
+            center=dict(lat=47.625, lon=-122.340),
+            zoom=10.5,
         ),
         margin=dict(l=0, r=0, t=0, b=0),
         height=560,
