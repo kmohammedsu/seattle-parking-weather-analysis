@@ -814,26 +814,21 @@ elif page == "🏗️ Infrastructure":
 
 elif page == "🗺️ Geo Map":
     st.title("Parking Demand Map")
-    st.caption("Average occupancy by region — hover markers for details")
+    st.caption("Paid meter district occupancy across Seattle — hover for details")
 
     if features.empty:
         st.error("No data to display.")
         st.stop()
 
-    # Coordinates are the actual paid-meter district centroids in Seattle
     REGION_COORDS = {
-        "Downtown Seattle":    (47.6080, -122.3360),  # 3rd Ave & Pike core
-        "Capitol Hill":        (47.6230, -122.3198),  # Broadway & Pike
-        "South Lake Union":    (47.6270, -122.3367),  # Westlake & Thomas
-        "Ballard":             (47.6683, -122.3843),  # NW Market & 22nd Ave NW
-        "Industrial District": (47.5804, -122.3292),  # 4th Ave S & Lander (SoDo)
+        "Downtown Seattle":    (47.6080, -122.3360),
+        "Capitol Hill":        (47.6230, -122.3198),
+        "South Lake Union":    (47.6270, -122.3367),
+        "Ballard":             (47.6683, -122.3843),
+        "Industrial District": (47.5804, -122.3292),
     }
 
-    region_occ = (
-        features.groupby("region")["avg_occupancy_rate"]
-        .mean()
-        .reset_index()
-    )
+    region_occ = features.groupby("region")["avg_occupancy_rate"].mean().reset_index()
 
     if not pricing.empty and "action" in pricing.columns:
         top_action = (
@@ -847,127 +842,86 @@ elif page == "🗺️ Geo Map":
     else:
         region_occ["top_action"] = "hold"
 
-    def occ_color(rate: float) -> str:
-        if rate > 0.85:
-            return "#e05c5c"
-        elif rate >= 0.70:
-            return "#4caf8f"
-        else:
-            return "#4a90d9"
-
-    def occ_glow(rate: float) -> str:
-        if rate > 0.85:
-            return "rgba(224,92,92,0.4)"
-        elif rate >= 0.70:
-            return "rgba(76,175,143,0.4)"
-        else:
-            return "rgba(74,144,217,0.4)"
-
-    all_coords = list(REGION_COORDS.values())
-    sw = [min(c[0] for c in all_coords) - 0.01, min(c[1] for c in all_coords) - 0.01]
-    ne = [max(c[0] for c in all_coords) + 0.01, max(c[1] for c in all_coords) + 0.01]
-
-    m = folium.Map(
-        tiles="CartoDB dark_matter",
-        zoom_control=True,
+    region_occ["lat"] = region_occ["region"].map(lambda r: REGION_COORDS.get(r, (47.61, -122.33))[0])
+    region_occ["lon"] = region_occ["region"].map(lambda r: REGION_COORDS.get(r, (47.61, -122.33))[1])
+    region_occ["occupancy_pct"] = (region_occ["avg_occupancy_rate"] * 100).round(1)
+    region_occ["status"] = region_occ["avg_occupancy_rate"].apply(
+        lambda r: "High Demand (>85%)" if r > 0.85 else ("On Target (70–85%)" if r >= 0.70 else "Underutilized (<70%)")
     )
-    m.fit_bounds([sw, ne])
+    region_occ["color"] = region_occ["avg_occupancy_rate"].apply(
+        lambda r: "#e05c5c" if r > 0.85 else ("#4caf8f" if r >= 0.70 else "#4a90d9")
+    )
+    region_occ["action_label"] = region_occ["top_action"].map(
+        {"increase": "⬆ Raise rates", "decrease": "⬇ Lower rates", "hold": "✓ Hold rates"}
+    ).fillna("✓ Hold rates")
 
-    for _, row in region_occ.iterrows():
-        coords = REGION_COORDS.get(row["region"], (47.61, -122.33))
-        rate = row["avg_occupancy_rate"]
-        color = occ_color(rate)
-        glow = occ_glow(rate)
-        action = row["top_action"]
-        action_text = {"increase": "⬆ Raise rates", "decrease": "⬇ Lower rates", "hold": "✓ Hold rates"}.get(action, "—")
-        status = "OVER TARGET" if rate > 0.85 else ("ON TARGET" if rate >= 0.70 else "UNDERUTILIZED")
+    fig = go.Figure()
 
-        # Pulse ring (slightly larger, transparent circle behind)
-        folium.CircleMarker(
-            location=coords,
-            radius=22 + rate * 12,
-            color=color,
-            fill=True,
-            fill_color=glow,
-            fill_opacity=0.25,
-            weight=1,
-        ).add_to(m)
+    # Outer glow ring
+    fig.add_trace(go.Scattermap(
+        lat=region_occ["lat"],
+        lon=region_occ["lon"],
+        mode="markers",
+        marker=dict(
+            size=region_occ["occupancy_pct"] * 0.7 + 30,
+            color=region_occ["color"],
+            opacity=0.2,
+        ),
+        hoverinfo="skip",
+        showlegend=False,
+    ))
 
-        # Main filled circle — no popup (eliminates the connector line)
-        folium.CircleMarker(
-            location=coords,
-            radius=14 + rate * 8,
-            color=color,
-            fill=True,
-            fill_color=color,
-            fill_opacity=0.85,
-            weight=2,
-            tooltip=folium.Tooltip(
-                f"""<div style='font-family:sans-serif;font-size:13px;
-                              background:#1a2035;color:#e8eaf6;
-                              padding:10px 14px;border-radius:8px;
-                              border:1px solid {color};min-width:160px'>
-                    <b style='font-size:15px;color:{color}'>{row['region']}</b><br>
-                    <hr style='border-color:#2a3550;margin:6px 0'>
-                    <b>Occupancy:</b> {rate:.1%}<br>
-                    <b>Status:</b> <span style='color:{color}'>{status}</span><br>
-                    <b>Action:</b> {action_text}
-                </div>""",
-                sticky=True,
-            ),
-        ).add_to(m)
+    # Main markers
+    fig.add_trace(go.Scattermap(
+        lat=region_occ["lat"],
+        lon=region_occ["lon"],
+        mode="markers+text",
+        marker=dict(
+            size=region_occ["occupancy_pct"] * 0.5 + 20,
+            color=region_occ["color"],
+            opacity=0.9,
+        ),
+        text=region_occ["region"] + "<br>" + region_occ["occupancy_pct"].map("{:.0f}%".format),
+        textposition="bottom center",
+        textfont=dict(color="white", size=11),
+        customdata=np.stack([
+            region_occ["region"],
+            region_occ["occupancy_pct"],
+            region_occ["status"],
+            region_occ["action_label"],
+        ], axis=-1),
+        hovertemplate=(
+            "<b>%{customdata[0]}</b><br>"
+            "Occupancy: %{customdata[1]:.0f}%<br>"
+            "Status: %{customdata[2]}<br>"
+            "Action: %{customdata[3]}"
+            "<extra></extra>"
+        ),
+        showlegend=False,
+    ))
 
-        # Region label directly on map
-        folium.Marker(
-            location=coords,
-            icon=folium.DivIcon(
-                html=f"""<div style='
-                    font-family:sans-serif;font-size:10px;font-weight:700;
-                    color:#e8eaf6;text-shadow:0 1px 3px #000;
-                    white-space:nowrap;margin-top:28px;margin-left:-30px;
-                    text-align:center;width:80px;
-                '>{row['region'].split()[0]}<br>
-                <span style='color:{color};font-size:12px'>{rate:.0%}</span></div>""",
-                icon_size=(80, 40),
-                icon_anchor=(40, 0),
-            ),
-        ).add_to(m)
+    fig.update_layout(
+        map=dict(
+            style="carto-darkmatter",
+            center=dict(lat=47.630, lon=-122.340),
+            zoom=11,
+        ),
+        margin=dict(l=0, r=0, t=0, b=0),
+        height=560,
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+    )
 
-    m.get_root().html.add_child(folium.Element("""
-    <div style="position:fixed;top:16px;right:16px;z-index:9999;
-                background:rgba(15,17,23,0.95);padding:14px 18px;
-                border-radius:10px;border:1px solid #2a3550;
-                font-family:sans-serif;font-size:12px;color:#c8d0e8;
-                min-width:200px">
-        <b style="font-size:13px;color:#e8eaf6">Occupancy Level</b><br><br>
-        <div style="margin:4px 0">
-          <span style="color:#e05c5c;font-size:16px">●</span>
-          <span style="margin-left:6px">&gt;85% — High demand</span>
-        </div>
-        <div style="margin:4px 0">
-          <span style="color:#4caf8f;font-size:16px">●</span>
-          <span style="margin-left:6px">70–85% — On target</span>
-        </div>
-        <div style="margin:4px 0">
-          <span style="color:#4a90d9;font-size:16px">●</span>
-          <span style="margin-left:6px">&lt;70% — Underutilized</span>
-        </div>
-        <hr style="border-color:#2a3550;margin:10px 0 6px">
-        <div style="color:#7b8db0;font-size:11px">Hover markers for details</div>
-    </div>
-    """))
-
-    st_folium(m, use_container_width=True, height=580, returned_objects=[])
+    st.plotly_chart(fig, use_container_width=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
     section("REGION BREAKDOWN")
     cols = st.columns(len(region_occ))
     for i, (_, row) in enumerate(region_occ.sort_values("avg_occupancy_rate", ascending=False).iterrows()):
         rate = row["avg_occupancy_rate"]
-        color = occ_color(rate)
+        color = row["color"]
         status = "HIGH DEMAND" if rate > 0.85 else ("ON TARGET" if rate >= 0.70 else "UNDERUTILIZED")
-        action = row["top_action"]
-        action_icon = {"increase": "⬆", "decrease": "⬇", "hold": "→"}.get(action, "→")
+        action_icon = {"increase": "⬆", "decrease": "⬇", "hold": "→"}.get(row["top_action"], "→")
         with cols[i]:
             st.markdown(f"""
             <div style="background:#1a2035;border:1px solid {color}40;border-top:3px solid {color};
@@ -975,6 +929,6 @@ elif page == "🗺️ Geo Map":
                 <div style="font-size:11px;color:#7b8db0;font-weight:600;letter-spacing:.05em">{row['region'].upper()}</div>
                 <div style="font-size:30px;font-weight:700;color:{color};margin:6px 0">{rate:.0%}</div>
                 <div style="font-size:10px;color:{color};font-weight:600">{status}</div>
-                <div style="font-size:11px;color:#7b8db0;margin-top:4px">{action_icon} {action}</div>
+                <div style="font-size:11px;color:#7b8db0;margin-top:4px">{action_icon} {row['top_action']}</div>
             </div>
             """, unsafe_allow_html=True)
