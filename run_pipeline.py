@@ -41,15 +41,16 @@ def main():
     results = {}
 
     # Step 1 — Fetch all data sources
-    results["weather"]   = run_step("Fetch weather",        "weather_fetch")
-    results["parking"]   = run_step("Fetch live parking",   "fetch_parking")
-    results["events"]    = run_step("Fetch events",         "fetch_events")
-    results["permits"]   = run_step("Fetch city permits",   "fetch_permits")
-    results["closures"]  = run_step("Fetch road closures",  "fetch_closures")
-    results["holidays"]  = run_step("Build holiday calendar", "holidays_features")
+    results["weather"]        = run_step("Fetch weather",           "weather_fetch")
+    results["weather_process"]= run_step("Process weather data",    "weather_eda")
+    results["parking"]        = run_step("Fetch live parking",      "fetch_parking")
+    results["events"]         = run_step("Fetch events",            "fetch_events")
+    results["permits"]        = run_step("Fetch city permits",      "fetch_permits")
+    results["closures"]       = run_step("Fetch road closures",     "fetch_closures")
+    results["holidays"]       = run_step("Build holiday calendar",  "holidays_features")
 
     # Step 2 — Aggregate raw data into features
-    results["aggregate"] = run_step("Aggregate features",   "aggregate_features")
+    results["aggregate"]      = run_step("Aggregate features",      "aggregate_features")
 
     # Summary
     log("-" * 60)

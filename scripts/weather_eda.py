@@ -3,89 +3,81 @@ import os
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
+from pathlib import Path
 
-# Define paths
-input_json_path = "data/seattle_weather_by_region.json"
-output_folder = "visualizations/weather"
-processed_weather_file = "data/processed_weather_data.csv"
+ROOT = Path(__file__).resolve().parent.parent
+INPUT_JSON = ROOT / "data" / "seattle_weather_by_region.json"
+OUTPUT_CSV = ROOT / "data" / "processed_weather_data.csv"
+VIZ_DIR    = ROOT / "visualizations" / "weather"
 
-# Ensure visualization directory exists
-os.makedirs(output_folder, exist_ok=True)
 
-# Load the saved JSON file
-with open(input_json_path, "r") as json_file:
-    weather_data = json.load(json_file)
-
-# Convert JSON data into a structured DataFrame
-def process_weather_data(weather_data):
+def process_weather_data(weather_data: dict) -> pd.DataFrame:
     data_list = []
     for region, region_data in weather_data.items():
-        hourly_data = region_data.get("hourly", {})
-        timestamps = hourly_data.get("time", [])
-        temperatures = hourly_data.get("temperature_2m", [])
-        precipitation = hourly_data.get("precipitation", [])
-        wind_speed_kmh = hourly_data.get("windspeed_10m", [])
-        elevation = region_data.get("elevation", None)  # Capture elevation data
+        hourly     = region_data.get("hourly", {})
+        timestamps = hourly.get("time", [])
+        temps      = hourly.get("temperature_2m", [])
+        precip     = hourly.get("precipitation", [])
+        wind_kmh   = hourly.get("windspeed_10m", [])
+        elevation  = region_data.get("elevation", None)
 
-        for i in range(len(timestamps)):
+        for ts, t, p, w in zip(timestamps, temps, precip, wind_kmh):
             data_list.append({
-                "region": region,
-                "timestamp": pd.to_datetime(timestamps[i]),
-                "temperature": temperatures[i],
-                "precipitation": precipitation[i],
-                "wind_speed": wind_speed_kmh[i] / 3.6,  # Convert km/h to m/s
-                "elevation": elevation  # Store elevation per region
+                "region":        region,
+                "timestamp":     pd.to_datetime(ts),
+                "temperature":   t,
+                "precipitation": p,
+                "wind_speed":    w / 3.6,  # km/h → m/s
+                "elevation":     elevation,
             })
     return pd.DataFrame(data_list)
 
-weather_df = process_weather_data(weather_data)
-weather_df.set_index("timestamp", inplace=True)
 
-# Summary statistics
-print("\nSummary Statistics for Weather Data:")
-print(weather_df.describe())
+def run():
+    os.makedirs(VIZ_DIR, exist_ok=True)
 
-# Save processed weather data
-weather_df.to_csv(processed_weather_file)
-print(f"Processed weather data saved at: {processed_weather_file}")
+    print(f"Processing weather data from {INPUT_JSON.name}...")
+    with open(INPUT_JSON) as f:
+        weather_data = json.load(f)
 
-# Temperature trends over time
-plt.figure(figsize=(12, 6))
-sns.lineplot(data=weather_df, x=weather_df.index, y="temperature", hue="region", alpha=0.7)
-plt.xlabel("Time")
-plt.ylabel("Temperature (°C)")
-plt.title("Temperature Trends Over Time by Region")
-plt.legend(title="Region")
-plt.savefig(os.path.join(output_folder, "weather_temperature_trends.png"))
-plt.close()
+    df = process_weather_data(weather_data)
+    df = df.set_index("timestamp")
 
-# Precipitation impact
-plt.figure(figsize=(12, 6))
-sns.boxplot(x="region", y="precipitation", data=weather_df)
-plt.xlabel("Region")
-plt.ylabel("Precipitation (mm)")
-plt.title("Precipitation Distribution by Region")
-plt.xticks(rotation=45)
-plt.savefig(os.path.join(output_folder, "weather_precipitation_distribution.png"))
-plt.close()
+    print(f"  {len(df):,} hourly records | {df.index.min()} → {df.index.max()}")
+    print(df.describe().round(2))
 
-# Wind Speed Analysis (Converted to m/s)
-plt.figure(figsize=(12, 6))
-sns.histplot(weather_df["wind_speed"], bins=30, kde=True)
-plt.xlabel("Wind Speed (m/s)")
-plt.ylabel("Frequency")
-plt.title("Wind Speed Distribution Across All Regions (m/s)")
-plt.savefig(os.path.join(output_folder, "weather_wind_speed_distribution.png"))
-plt.close()
+    df.to_csv(OUTPUT_CSV)
+    print(f"Saved to {OUTPUT_CSV}")
 
-# Elevation Analysis
-plt.figure(figsize=(8, 6))
-sns.boxplot(x="region", y="elevation", data=weather_df)
-plt.xlabel("Region")
-plt.ylabel("Elevation (m)")
-plt.title("Elevation Levels by Region")
-plt.xticks(rotation=45)
-plt.savefig(os.path.join(output_folder, "weather_elevation_by_region.png"))
-plt.close()
+    df_reset = df.reset_index()
 
-print(f"All visualizations saved in: {output_folder}")
+    plt.figure(figsize=(12, 6))
+    for region in df_reset["region"].unique():
+        sub = df_reset[df_reset["region"] == region].resample("ME", on="timestamp")["temperature"].mean()
+        plt.plot(sub.index, sub.values, label=region, alpha=0.8)
+    plt.xlabel("Time"); plt.ylabel("Temperature (°C)")
+    plt.title("Monthly Average Temperature by Region")
+    plt.legend(title="Region")
+    plt.tight_layout()
+    plt.savefig(VIZ_DIR / "weather_temperature_trends.png")
+    plt.close()
+
+    plt.figure(figsize=(12, 6))
+    sns.boxplot(x="region", y="precipitation", data=df_reset)
+    plt.xticks(rotation=45); plt.tight_layout()
+    plt.title("Precipitation Distribution by Region")
+    plt.savefig(VIZ_DIR / "weather_precipitation_distribution.png")
+    plt.close()
+
+    plt.figure(figsize=(10, 5))
+    sns.histplot(df["wind_speed"], bins=40, kde=True)
+    plt.xlabel("Wind Speed (m/s)"); plt.title("Wind Speed Distribution")
+    plt.tight_layout()
+    plt.savefig(VIZ_DIR / "weather_wind_speed_distribution.png")
+    plt.close()
+
+    print(f"Visualizations saved in {VIZ_DIR}")
+
+
+if __name__ == "__main__":
+    run()

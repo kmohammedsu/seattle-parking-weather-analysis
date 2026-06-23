@@ -155,8 +155,8 @@ def build_event_flags(base: pd.DataFrame, events: pd.DataFrame,
         base["has_road_closure"] = False
 
     # Fill booleans
-    base["is_event_day"] = base["is_event_day"].fillna(False)
-    base["has_city_event"] = base["has_city_event"].fillna(False)
+    base["is_event_day"] = base["is_event_day"].fillna(False).infer_objects(copy=False)
+    base["has_city_event"] = base["has_city_event"].fillna(False).infer_objects(copy=False)
     base["is_holiday"] = base["holiday_name"].notna() & (base["holiday_name"] != "")
     base["max_attendance"] = base["max_attendance"].fillna(0)
 
