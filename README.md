@@ -1,5 +1,8 @@
 # Seattle Parking Revenue Intelligence Platform
 
+[![Tests](https://github.com/kmohammedsu/seattle-parking-weather-analysis/actions/workflows/tests.yml/badge.svg)](https://github.com/kmohammedsu/seattle-parking-weather-analysis/actions/workflows/tests.yml)
+[![Daily Pipeline](https://github.com/kmohammedsu/seattle-parking-weather-analysis/actions/workflows/daily_pipeline.yml/badge.svg)](https://github.com/kmohammedsu/seattle-parking-weather-analysis/actions/workflows/daily_pipeline.yml)
+
 A city decision-support tool for the City of Seattle to optimize parking infrastructure and meter pricing under **Seattle Municipal Code 11.16.121** (Performance-Based Parking Pricing).
 
 Live data pipeline · LightGBM demand forecasting · Dynamic pricing recommendations · Streamlit dashboard
@@ -169,6 +172,21 @@ This tool accelerates the existing quarterly review process by:
 | City Events | Special Event Permits | Socrata `dm95-f8w5` |
 | Road Closures | Street Closure Permits | Socrata `ium9-iqtc` |
 | Holidays | WA state holidays | `holidays` Python library |
+
+---
+
+## Deploying to Streamlit Community Cloud (free)
+
+1. Go to [share.streamlit.io](https://share.streamlit.io) and sign in with GitHub
+2. Click **New app** → select this repository → branch: `main` → main file: `streamlit_app.py`
+3. In **Advanced settings → Secrets**, add:
+   ```toml
+   TICKETMASTER_API_KEY = "your_key_here"
+   HUGGINGFACE_TOKEN = "hf_..."   # optional, for model download
+   ```
+4. Click **Deploy** — Streamlit will install `requirements.txt` and launch
+
+The dashboard reads from committed CSVs in `data/` so it works immediately without re-running the pipeline. The daily GitHub Actions pipeline updates those CSVs automatically.
 
 ---
 
