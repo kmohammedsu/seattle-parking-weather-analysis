@@ -1,0 +1,14 @@
+SEATTLE PARKING AVAILABILITY PREDICTION MODEL
+==================================================
+
+Dataset: 838840 records with 26 features
+Target: Available parking spots (Parking_Spaces - Total_Vehicle_Count)
+Best model: RandomForest
+Test set R²: 0.8343
+Test set RMSE: 1.4675
+Test set Relative Error: 0.3970
+
+Model saved at: models/RandomForest_final_model.pkl
+
+Detailed results available in: models/final_model_performance.csv
+Cross-validation results in: models/cross_validation_results.csv

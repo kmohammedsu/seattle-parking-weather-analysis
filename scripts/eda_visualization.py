@@ -16,7 +16,7 @@ for col in numeric_cols:
 numeric_df = cleaned_df[numeric_cols]  # Selecting only numeric columns for resampling
 
 # Create a directory for saving visualizations
-visualization_dir = "Visualizations"
+visualization_dir = "visualizations/parking"
 os.makedirs(visualization_dir, exist_ok=True)
 
 # Summary Statistics

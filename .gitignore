@@ -5,7 +5,7 @@ data/*.pkl
 
 # Model files — stored on Hugging Face Hub
 models/*.pkl
-models/models/*.pkl
+models/performance/scaler.pkl
 
 # Pipeline state
 last_run.json

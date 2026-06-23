@@ -1,0 +1,92 @@
+[2026-06-22 17:08:44] ============================================================
+[2026-06-22 17:08:44] Seattle Parking Intelligence — Pipeline Start
+[2026-06-22 17:08:44] ============================================================
+[2026-06-22 17:08:44] ▶ Fetch weather
+[2026-06-22 17:09:12]   ✓ Fetch weather done
+[2026-06-22 17:09:12] ▶ Fetch live parking
+[2026-06-22 17:14:02] ============================================================
+[2026-06-22 17:14:02] Seattle Parking Intelligence — Pipeline Start
+[2026-06-22 17:14:02] ============================================================
+[2026-06-22 17:14:02] ▶ Fetch weather
+[2026-06-22 17:14:02]   ✓ Fetch weather done
+[2026-06-22 17:14:02] ▶ Fetch live parking
+[2026-06-22 17:22:09] ============================================================
+[2026-06-22 17:22:09] Seattle Parking Intelligence — Pipeline Start
+[2026-06-22 17:22:09] ============================================================
+[2026-06-22 17:22:09] ▶ Fetch weather
+[2026-06-22 17:22:09]   ✓ Fetch weather done
+[2026-06-22 17:22:09] ▶ Fetch live parking
+[2026-06-22 17:27:22] ============================================================
+[2026-06-22 17:27:22] Seattle Parking Intelligence — Pipeline Start
+[2026-06-22 17:27:22] ============================================================
+[2026-06-22 17:27:22] ▶ Fetch weather
+[2026-06-22 17:27:22]   ✓ Fetch weather done
+[2026-06-22 17:27:22] ▶ Fetch live parking
+[2026-06-22 17:27:23]   ✓ Fetch live parking done
+[2026-06-22 17:27:23] ▶ Fetch events
+[2026-06-22 17:27:24]   ✓ Fetch events done
+[2026-06-22 17:27:24] ▶ Fetch city permits
+[2026-06-22 17:27:25]   ✓ Fetch city permits done
+[2026-06-22 17:27:25] ▶ Fetch road closures
+[2026-06-22 17:27:26]   ✓ Fetch road closures done
+[2026-06-22 17:27:26] ▶ Build holiday calendar
+[2026-06-22 17:27:26]   ✓ Build holiday calendar done
+[2026-06-22 17:27:26] ▶ Aggregate features
+[2026-06-22 17:27:26]   ✗ Aggregate features failed: Missing column provided to 'parse_dates': 'occupancydatetime'
+[2026-06-22 17:27:26] ------------------------------------------------------------
+[2026-06-22 17:27:26] Pipeline complete: 6/7 steps succeeded
+[2026-06-22 17:27:26] Failed steps: aggregate
+[2026-06-22 17:27:45] ============================================================
+[2026-06-22 17:27:45] Seattle Parking Intelligence — Pipeline Start
+[2026-06-22 17:27:45] ============================================================
+[2026-06-22 17:27:45] ▶ Fetch weather
+[2026-06-22 17:27:45]   ✓ Fetch weather done
+[2026-06-22 17:27:45] ▶ Fetch live parking
+[2026-06-22 17:27:46]   ✓ Fetch live parking done
+[2026-06-22 17:27:46] ▶ Fetch events
+[2026-06-22 17:27:47]   ✓ Fetch events done
+[2026-06-22 17:27:47] ▶ Fetch city permits
+[2026-06-22 17:27:48]   ✓ Fetch city permits done
+[2026-06-22 17:27:48] ▶ Fetch road closures
+[2026-06-22 17:27:48]   ✓ Fetch road closures done
+[2026-06-22 17:27:48] ▶ Build holiday calendar
+[2026-06-22 17:27:48]   ✓ Build holiday calendar done
+[2026-06-22 17:27:48] ▶ Aggregate features
+[2026-06-22 17:27:49]   ✓ Aggregate features done
+[2026-06-22 17:27:49] ------------------------------------------------------------
+[2026-06-22 17:27:49] Pipeline complete: 7/7 steps succeeded
+[2026-06-22 17:27:49] All steps complete. Ready for model training.
+[2026-06-22 17:28:25] ============================================================
+[2026-06-22 17:28:25] Seattle Parking Intelligence — Pipeline Start
+[2026-06-22 17:28:25] ============================================================
+[2026-06-22 17:28:25] ▶ Fetch weather
+[2026-06-22 17:28:25]   ✓ Fetch weather done
+[2026-06-22 17:28:25] ▶ Fetch live parking
+[2026-06-22 17:28:26]   ✓ Fetch live parking done
+[2026-06-22 17:28:26] ▶ Fetch events
+[2026-06-22 17:28:27]   ✓ Fetch events done
+[2026-06-22 17:28:27] ▶ Fetch city permits
+[2026-06-22 17:28:28]   ✓ Fetch city permits done
+[2026-06-22 17:28:28] ▶ Fetch road closures
+[2026-06-22 17:28:28]   ✓ Fetch road closures done
+[2026-06-22 17:28:28] ▶ Build holiday calendar
+[2026-06-22 17:28:28]   ✓ Build holiday calendar done
+[2026-06-22 17:28:28] ▶ Aggregate features
+[2026-06-22 17:28:29]   ✓ Aggregate features done
+[2026-06-22 17:28:29] ------------------------------------------------------------
+[2026-06-22 17:28:29] Pipeline complete: 7/7 steps succeeded
+[2026-06-22 17:28:29] All steps complete. Ready for model training.
+[2026-06-22 18:39:20]   ✗ Fetch live parking failed: Missing column provided to 'parse_dates': 'occupancydatetime'
+[2026-06-22 18:39:22] ▶ Fetch events
+[2026-06-22 18:39:24]   ✓ Fetch events done
+[2026-06-22 18:39:24] ▶ Fetch city permits
+[2026-06-22 18:39:25]   ✓ Fetch city permits done
+[2026-06-22 18:39:25] ▶ Fetch road closures
+[2026-06-22 18:39:25]   ✓ Fetch road closures done
+[2026-06-22 18:39:25] ▶ Build holiday calendar
+[2026-06-22 18:39:25]   ✓ Build holiday calendar done
+[2026-06-22 18:39:25] ▶ Aggregate features
+[2026-06-22 18:39:26]   ✓ Aggregate features done
+[2026-06-22 18:39:26] ------------------------------------------------------------
+[2026-06-22 18:39:26] Pipeline complete: 6/7 steps succeeded
+[2026-06-22 18:39:26] Failed steps: parking

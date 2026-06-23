@@ -6,7 +6,7 @@ import seaborn as sns
 
 # Define paths
 input_json_path = "data/seattle_weather_by_region.json"
-output_folder = "Visualizations"
+output_folder = "visualizations/weather"
 processed_weather_file = "data/processed_weather_data.csv"
 
 # Ensure visualization directory exists
