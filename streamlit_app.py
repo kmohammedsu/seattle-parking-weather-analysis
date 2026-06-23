@@ -1,4 +1,6 @@
-# Streamlit Cloud entry point
-# Streamlit Cloud looks for streamlit_app.py at the repo root by default.
-# This file re-exports the dashboard so we don't duplicate code.
-exec(open("dashboard/app.py").read())
+# Streamlit Cloud entry point — sets __file__ correctly before exec so that
+# Path(__file__).resolve().parent.parent resolves to the repo root inside app.py
+import os
+_app = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dashboard", "app.py")
+with open(_app) as _f:
+    exec(compile(_f.read(), _app, "exec"))
