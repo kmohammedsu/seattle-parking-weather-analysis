@@ -15,9 +15,9 @@ TM_URL = "https://app.ticketmaster.com/discovery/v2/events.json"
 TIMEOUT = 30
 
 SEATTLE_VENUES = {
-    "Lumen Field":          "KovZpZAEdntA",  # Seahawks / Sounders
-    "T-Mobile Park":        "KovZpZAEkvAA",  # Mariners
-    "Climate Pledge Arena": "KovZpZAEkvFA",  # Kraken / Storm / concerts
+    "Lumen Field":          "KovZpZAEdntA",   # Seahawks / Sounders / concerts
+    "T-Mobile Park":        "KovZpZAEevAA",   # Mariners
+    "Climate Pledge Arena": "KovZ917Ahkk",    # Kraken / Storm / concerts
 }
 
 
