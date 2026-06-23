@@ -1,6 +1,7 @@
-# Streamlit Cloud entry point — sets __file__ correctly before exec so that
-# Path(__file__).resolve().parent.parent resolves to the repo root inside app.py
 import os
-_app = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dashboard", "app.py")
+from pathlib import Path
+
+_app = Path(__file__).resolve().parent / "dashboard" / "app.py"
+
 with open(_app) as _f:
-    exec(compile(_f.read(), _app, "exec"))
+    exec(compile(_f.read(), str(_app), "exec"), {"__file__": str(_app), "__name__": "__main__"})
