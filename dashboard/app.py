@@ -814,7 +814,7 @@ elif page == "🏗️ Infrastructure":
 
 elif page == "🗺️ Geo Map":
     st.title("Parking Demand Map")
-    st.caption("Average occupancy by region — click markers for details")
+    st.caption("Average occupancy by region — hover markers for details")
 
     if features.empty:
         st.error("No data to display.")
@@ -823,9 +823,9 @@ elif page == "🗺️ Geo Map":
     REGION_COORDS = {
         "Downtown Seattle":    (47.6062, -122.3321),
         "Capitol Hill":        (47.6253, -122.3222),
-        "South Lake Union":    (47.6278, -122.3367),
+        "South Lake Union":    (47.6205, -122.3367),
         "Ballard":             (47.6677, -122.3833),
-        "Industrial District": (47.5873, -122.3294),
+        "Industrial District": (47.5785, -122.3220),
     }
 
     region_occ = (
@@ -834,7 +834,6 @@ elif page == "🗺️ Geo Map":
         .reset_index()
     )
 
-    # Merge in pricing info if available
     if not pricing.empty and "action" in pricing.columns:
         top_action = (
             pricing.groupby("region")["action"]
@@ -849,81 +848,129 @@ elif page == "🗺️ Geo Map":
 
     def occ_color(rate: float) -> str:
         if rate > 0.85:
-            return "#c0392b"
+            return "#e05c5c"
         elif rate >= 0.70:
-            return "#27ae60"
+            return "#4caf8f"
         else:
-            return "#2980b9"
+            return "#4a90d9"
+
+    def occ_glow(rate: float) -> str:
+        if rate > 0.85:
+            return "rgba(224,92,92,0.4)"
+        elif rate >= 0.70:
+            return "rgba(76,175,143,0.4)"
+        else:
+            return "rgba(74,144,217,0.4)"
 
     m = folium.Map(
-        location=[47.620, -122.335],
+        location=[47.620, -122.340],
         zoom_start=12,
         tiles="CartoDB dark_matter",
+        zoom_control=True,
     )
 
     for _, row in region_occ.iterrows():
         coords = REGION_COORDS.get(row["region"], (47.61, -122.33))
         rate = row["avg_occupancy_rate"]
         color = occ_color(rate)
+        glow = occ_glow(rate)
         action = row["top_action"]
-        action_text = {
-            "increase": "⬆ Raise rates",
-            "decrease": "⬇ Lower rates",
-            "hold": "✓ Hold rates",
-        }.get(action, "—")
+        action_text = {"increase": "⬆ Raise rates", "decrease": "⬇ Lower rates", "hold": "✓ Hold rates"}.get(action, "—")
+        status = "OVER TARGET" if rate > 0.85 else ("ON TARGET" if rate >= 0.70 else "UNDERUTILIZED")
 
-        status = "Over target" if rate > 0.85 else ("On target" if rate >= 0.70 else "Under target")
-
-        popup_html = f"""
-        <div style="font-family:sans-serif;min-width:160px">
-            <b style="font-size:14px">{row['region']}</b><br>
-            <hr style="margin:4px 0">
-            <b>Occupancy:</b> {rate:.1%}<br>
-            <b>Status:</b> {status}<br>
-            <b>Pricing action:</b> {action_text}
-        </div>
-        """
+        # Pulse ring (slightly larger, transparent circle behind)
         folium.CircleMarker(
             location=coords,
-            radius=10 + rate * 25,
+            radius=22 + rate * 12,
+            color=color,
+            fill=True,
+            fill_color=glow,
+            fill_opacity=0.25,
+            weight=1,
+        ).add_to(m)
+
+        # Main filled circle — no popup (eliminates the connector line)
+        folium.CircleMarker(
+            location=coords,
+            radius=14 + rate * 8,
             color=color,
             fill=True,
             fill_color=color,
-            fill_opacity=0.7,
+            fill_opacity=0.85,
             weight=2,
-            popup=folium.Popup(popup_html, max_width=220),
-            tooltip=f"{row['region']}: {rate:.1%}",
+            tooltip=folium.Tooltip(
+                f"""<div style='font-family:sans-serif;font-size:13px;
+                              background:#1a2035;color:#e8eaf6;
+                              padding:10px 14px;border-radius:8px;
+                              border:1px solid {color};min-width:160px'>
+                    <b style='font-size:15px;color:{color}'>{row['region']}</b><br>
+                    <hr style='border-color:#2a3550;margin:6px 0'>
+                    <b>Occupancy:</b> {rate:.1%}<br>
+                    <b>Status:</b> <span style='color:{color}'>{status}</span><br>
+                    <b>Action:</b> {action_text}
+                </div>""",
+                sticky=True,
+            ),
         ).add_to(m)
 
-    legend_html = """
-    <div style="position:fixed;bottom:30px;left:30px;z-index:9999;
-                background:rgba(15,17,23,0.92);padding:12px 16px;
+        # Region label directly on map
+        folium.Marker(
+            location=coords,
+            icon=folium.DivIcon(
+                html=f"""<div style='
+                    font-family:sans-serif;font-size:10px;font-weight:700;
+                    color:#e8eaf6;text-shadow:0 1px 3px #000;
+                    white-space:nowrap;margin-top:28px;margin-left:-30px;
+                    text-align:center;width:80px;
+                '>{row['region'].split()[0]}<br>
+                <span style='color:{color};font-size:12px'>{rate:.0%}</span></div>""",
+                icon_size=(80, 40),
+                icon_anchor=(40, 0),
+            ),
+        ).add_to(m)
+
+    m.get_root().html.add_child(folium.Element("""
+    <div style="position:fixed;top:16px;right:16px;z-index:9999;
+                background:rgba(15,17,23,0.95);padding:14px 18px;
                 border-radius:10px;border:1px solid #2a3550;
-                font-family:sans-serif;font-size:12px;color:#c8d0e8;">
-        <b style="font-size:13px">Occupancy Level</b><br><br>
-        <span style="color:#c0392b;font-size:18px">●</span> &gt;85% — High demand (raise rates)<br>
-        <span style="color:#27ae60;font-size:18px">●</span> 70–85% — On target<br>
-        <span style="color:#2980b9;font-size:18px">●</span> &lt;70% — Low demand (analyze)
+                font-family:sans-serif;font-size:12px;color:#c8d0e8;
+                min-width:200px">
+        <b style="font-size:13px;color:#e8eaf6">Occupancy Level</b><br><br>
+        <div style="margin:4px 0">
+          <span style="color:#e05c5c;font-size:16px">●</span>
+          <span style="margin-left:6px">&gt;85% — High demand</span>
+        </div>
+        <div style="margin:4px 0">
+          <span style="color:#4caf8f;font-size:16px">●</span>
+          <span style="margin-left:6px">70–85% — On target</span>
+        </div>
+        <div style="margin:4px 0">
+          <span style="color:#4a90d9;font-size:16px">●</span>
+          <span style="margin-left:6px">&lt;70% — Underutilized</span>
+        </div>
+        <hr style="border-color:#2a3550;margin:10px 0 6px">
+        <div style="color:#7b8db0;font-size:11px">Hover markers for details</div>
     </div>
-    """
-    m.get_root().html.add_child(folium.Element(legend_html))
+    """))
 
-    col_map, col_stats = st.columns([3, 1])
+    st_folium(m, use_container_width=True, height=580, returned_objects=[])
 
-    with col_map:
-        st_folium(m, width=800, height=560, returned_objects=[])
-
-    with col_stats:
-        section("REGION RANKING")
-        for _, row in region_occ.sort_values("avg_occupancy_rate", ascending=False).iterrows():
-            rate = row["avg_occupancy_rate"]
-            color = occ_color(rate)
-            status = "HIGH" if rate > 0.85 else ("TARGET" if rate >= 0.70 else "LOW")
+    st.markdown("<br>", unsafe_allow_html=True)
+    section("REGION BREAKDOWN")
+    cols = st.columns(len(region_occ))
+    for i, (_, row) in enumerate(region_occ.sort_values("avg_occupancy_rate", ascending=False).iterrows()):
+        rate = row["avg_occupancy_rate"]
+        color = occ_color(rate)
+        status = "HIGH DEMAND" if rate > 0.85 else ("ON TARGET" if rate >= 0.70 else "UNDERUTILIZED")
+        action = row["top_action"]
+        action_icon = {"increase": "⬆", "decrease": "⬇", "hold": "→"}.get(action, "→")
+        with cols[i]:
             st.markdown(f"""
-            <div style="background:#1a2035;border:1px solid #2a3550;border-radius:8px;
-                        padding:10px 14px;margin-bottom:8px;">
-                <div style="font-size:12px;color:#7b8db0;font-weight:600">{row['region']}</div>
-                <div style="font-size:22px;font-weight:700;color:{color}">{rate:.0%}</div>
+            <div style="background:#1a2035;border:1px solid {color}40;border-top:3px solid {color};
+                        border-radius:8px;padding:14px 16px;text-align:center">
+                <div style="font-size:11px;color:#7b8db0;font-weight:600;letter-spacing:.05em">{row['region'].upper()}</div>
+                <div style="font-size:30px;font-weight:700;color:{color};margin:6px 0">{rate:.0%}</div>
                 <div style="font-size:10px;color:{color};font-weight:600">{status}</div>
+                <div style="font-size:11px;color:#7b8db0;margin-top:4px">{action_icon} {action}</div>
             </div>
             """, unsafe_allow_html=True)
