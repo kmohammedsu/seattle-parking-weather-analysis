@@ -25,3 +25,6 @@ huggingface_hub>=0.20
 # Notebook support (optional, for local dev)
 notebook>=6.5
 ipython>=8.0
+
+# Testing
+pytest>=7.4
