@@ -67,13 +67,14 @@ LGBM_PARAMS = {
 }
 
 
-def load_features(rolling_months: int = 12) -> pd.DataFrame:
+def load_features(rolling_months=12) -> pd.DataFrame:
     df = pd.read_csv(FEATURES_FILE, parse_dates=["hour"])
-
-    # Rolling window — keep only the last N months to stay current
-    cutoff = df["hour"].max() - pd.DateOffset(months=rolling_months)
-    df = df[df["hour"] >= cutoff].copy()
-    print(f"  Rolling window: {cutoff.date()} → {df['hour'].max().date()} ({len(df):,} rows)")
+    if rolling_months is not None:
+        cutoff = df["hour"].max() - pd.DateOffset(months=rolling_months)
+        df = df[df["hour"] >= cutoff].copy()
+        print(f"  Rolling window: {cutoff.date()} → {df['hour'].max().date()} ({len(df):,} rows)")
+    else:
+        print(f"  Full history: {df['hour'].min().date()} → {df['hour'].max().date()} ({len(df):,} rows)")
     return df
 
 
@@ -118,7 +119,7 @@ def evaluate(model, X_test, y_test) -> dict:
     return {"rmse": rmse, "mae": mae, "r2": r2, "n_test": len(y_test)}
 
 
-def run():
+def run(rolling_months=12):
     MODELS_DIR.mkdir(exist_ok=True)
     PERF_DIR.mkdir(exist_ok=True)
 
@@ -127,7 +128,7 @@ def run():
         return
 
     print("Loading features...")
-    df = load_features(rolling_months=12)
+    df = load_features(rolling_months=rolling_months)
 
     if len(df) < 100:
         print(f"  Only {len(df)} rows — need more data. Run backfill_parking.py first.")

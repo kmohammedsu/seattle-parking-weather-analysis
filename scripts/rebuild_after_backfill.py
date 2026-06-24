@@ -59,10 +59,10 @@ def run():
         return
     print(f"Features built: {len(features):,} rows")
 
-    # Step 3: Train model on full history
+    # Step 3: Train model on full history (no rolling window)
     print("\n[2/3] Training model on full historical feature set...")
     import train_model
-    metrics = train_model.run()
+    metrics = train_model.run(rolling_months=None)
     if metrics:
         print(f"Model trained — R²: {metrics['r2']:.4f}, RMSE: {metrics['rmse']:.4f}")
         print(f"Training samples: {metrics['n_train']:,}")
