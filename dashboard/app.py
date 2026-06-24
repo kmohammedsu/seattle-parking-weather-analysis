@@ -585,9 +585,8 @@ elif page == "📈 Forecast":
     fig.add_hline(y=0.70, line_dash="dash", line_color="#f5a623", line_width=1)
     fig.update_layout(
         title=f"7-Day Occupancy Forecast — {selected_region}",
-        yaxis=dict(tickformat=".0%", range=[0, 1]),
         height=400,
-        **PLOTLY_THEME,
+        **{**PLOTLY_THEME, "yaxis": dict(tickformat=".0%", range=[0, 1])},
     )
     st.plotly_chart(fig, use_container_width=True)
 
