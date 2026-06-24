@@ -78,6 +78,9 @@ def load_features(rolling_months=12) -> pd.DataFrame:
     return df
 
 
+WEATHER_COLS = {"temperature", "precipitation", "wind_speed", "elevation"}
+
+
 def prepare(df: pd.DataFrame) -> tuple:
     available = [c for c in FEATURE_COLS if c in df.columns]
     missing = set(FEATURE_COLS) - set(available)
@@ -87,6 +90,13 @@ def prepare(df: pd.DataFrame) -> tuple:
     for col in available:
         if df[col].dtype == bool:
             df[col] = df[col].astype(int)
+
+    # Fill weather NaNs with median — historical rows lack weather but are still valid
+    for col in available:
+        if col in WEATHER_COLS and df[col].isna().any():
+            median = df[col].median()
+            df[col] = df[col].fillna(median if pd.notna(median) else 0.0)
+            print(f"  Filled {col} NaNs with median ({median:.2f})")
 
     df = df.dropna(subset=[TARGET] + available)
     X = df[available]

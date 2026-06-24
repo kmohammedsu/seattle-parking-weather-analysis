@@ -30,7 +30,7 @@ def check_backfill_complete() -> bool:
                 if f"{y}-{m:02d}" <= "2026-06"}  # up to current month
     coverage = len(completed & expected) / len(expected) * 100
     print(f"Backfill coverage: {len(completed)}/{len(expected)} months ({coverage:.0f}%)")
-    return len(completed) > 50  # at least 50% complete before rebuilding
+    return len(completed) >= 50  # at least 50% complete before rebuilding
 
 
 def run():
