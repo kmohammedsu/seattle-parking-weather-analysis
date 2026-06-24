@@ -813,10 +813,11 @@ elif page == "🏗️ Infrastructure":
 
 elif page == "🗺️ Geo Map":
     import folium
+    import json as _json
     from streamlit_folium import st_folium
 
     st.title("Parking Demand Map")
-    st.caption("Circle size = avg spaces in district · Color = occupancy level · Click a circle for full stats")
+    st.caption("Neighborhood polygons from Seattle Open Data · Circle size = avg parking spaces · Click for full stats")
 
     if features.empty:
         st.error("No data to display.")
@@ -896,13 +897,31 @@ elif page == "🗺️ Geo Map":
 
     action_labels = {"increase": "⬆ Raise rates", "decrease": "⬇ Lower rates", "hold": "✓ Hold rates"}
 
-    # Circle radius scaled to avg_spaces (20–60px range)
+    # Distinct color per district for polygon fills
+    DISTRICT_COLORS = {
+        "Downtown Seattle":      "#2563EB",
+        "South Lake Union":      "#059669",
+        "Capitol Hill":          "#DC2626",
+        "International District":"#7C3AED",
+        "Ballard":               "#EA580C",
+    }
+
+    # Circle radius scaled to avg_spaces
     min_sp = reg_stats["avg_spaces"].min()
     max_sp = reg_stats["avg_spaces"].max()
     def space_radius(spaces):
         if max_sp == min_sp:
             return 35
         return 18 + 32 * (spaces - min_sp) / (max_sp - min_sp)
+
+    # Load neighborhood polygon GeoJSON
+    _geojson_path = ROOT / "data" / "seattle_5_neighborhoods.geojson"
+    _neighborhoods_geojson = None
+    if _geojson_path.exists():
+        with open(_geojson_path) as _f:
+            _neighborhoods_geojson = _json.load(_f)
+
+    _occ_by_district = dict(zip(reg_stats["region"], reg_stats["avg_occ"]))
 
     m = folium.Map(
         location=[47.630, -122.330],
@@ -911,12 +930,34 @@ elif page == "🗺️ Geo Map":
         prefer_canvas=True,
     )
 
+    # Neighborhood polygon overlays — each district gets its own color
+    if _neighborhoods_geojson:
+        for feat in _neighborhoods_geojson["features"]:
+            district = feat["properties"]["neighborhood"]
+            rate = _occ_by_district.get(district, 0.5)
+            color = DISTRICT_COLORS.get(district, "#888888")
+            folium.GeoJson(
+                feat,
+                style_function=lambda x, c=color: {
+                    "fillColor":   c,
+                    "color":       c,
+                    "weight":      2.5,
+                    "fillOpacity": 0.20,
+                },
+                tooltip=folium.Tooltip(
+                    f"<b>{district}</b><br>Avg occupancy: {rate:.0%}",
+                    sticky=False,
+                ),
+            ).add_to(m)
+
     for _, row in reg_stats.iterrows():
         coords = REGION_COORDS.get(row["region"])
         if not coords:
             continue
 
-        color = occ_color(row["avg_occ"])
+        # District color for circle (matches polygon) — occupancy color for status badge only
+        color = DISTRICT_COLORS.get(row["region"], occ_color(row["avg_occ"]))
+        occ_col = occ_color(row["avg_occ"])
         radius = space_radius(row["avg_spaces"])
         action = row["top_action"]
         peak_h = int(row["peak_hour"]) if pd.notna(row.get("peak_hour")) else 0
@@ -924,15 +965,15 @@ elif page == "🗺️ Geo Map":
 
         popup_html = f"""
         <div style="font-family:Arial,sans-serif;min-width:220px;background:#12172b;color:#c8d0e8;
-                    border-radius:8px;padding:14px;border:1px solid {color}55">
+                    border-radius:8px;padding:14px;border-left:4px solid {color}">
             <div style="font-size:14px;font-weight:700;color:{color};margin-bottom:10px;
-                        border-bottom:1px solid {color}44;padding-bottom:6px">
+                        border-bottom:1px solid #2a3550;padding-bottom:6px">
                 {row['region']}
             </div>
             <table style="width:100%;border-collapse:collapse;font-size:12px">
                 <tr>
                     <td style="color:#7b8db0;padding:3px 0">Avg Occupancy</td>
-                    <td style="text-align:right;font-weight:600;color:{color}">{row['avg_occ']:.0%}</td>
+                    <td style="text-align:right;font-weight:600;color:{occ_col}">{row['avg_occ']:.0%}</td>
                 </tr>
                 <tr>
                     <td style="color:#7b8db0;padding:3px 0">Peak Occupancy</td>
@@ -950,21 +991,21 @@ elif page == "🗺️ Geo Map":
                     <td style="color:#7b8db0;padding:3px 0">Blockfaces</td>
                     <td style="text-align:right;font-weight:600;color:#c8d0e8">{int(row['num_blockfaces'])}</td>
                 </tr>
-                <tr style="border-top:1px solid #2a3550;margin-top:4px">
+                <tr style="border-top:1px solid #2a3550">
                     <td style="color:#7b8db0;padding:5px 0 3px">Current Rate</td>
                     <td style="text-align:right;font-weight:600;color:#c8d0e8">${row.get('current_rate', 0):.2f}/hr</td>
                 </tr>
                 <tr>
                     <td style="color:#7b8db0;padding:3px 0">Recommended</td>
-                    <td style="text-align:right;font-weight:600;color:{color}">${row.get('recommended_rate', 0):.2f}/hr</td>
+                    <td style="text-align:right;font-weight:600;color:{occ_col}">${row.get('recommended_rate', 0):.2f}/hr</td>
                 </tr>
                 <tr>
                     <td style="color:#7b8db0;padding:3px 0">Pricing Action</td>
-                    <td style="text-align:right;font-weight:600;color:{color}">{action_labels.get(action, action)}</td>
+                    <td style="text-align:right;font-weight:600;color:{occ_col}">{action_labels.get(action, action)}</td>
                 </tr>
             </table>
-            <div style="margin-top:8px;padding:5px 8px;background:{color}22;border-radius:4px;
-                        font-size:11px;color:{color};font-weight:600;text-align:center">
+            <div style="margin-top:8px;padding:5px 8px;background:{occ_col}22;border-radius:4px;
+                        font-size:11px;color:{occ_col};font-weight:600;text-align:center">
                 {occ_status(row['avg_occ'])}
             </div>
         </div>
@@ -972,7 +1013,7 @@ elif page == "🗺️ Geo Map":
 
         tooltip_html = (
             f"<b style='color:{color}'>{row['region']}</b><br>"
-            f"Occupancy: <b>{row['avg_occ']:.0%}</b><br>"
+            f"Occupancy: <b style='color:{occ_col}'>{row['avg_occ']:.0%}</b><br>"
             f"Spaces: {int(row['avg_spaces']):,} · Peak: {peak_label}"
         )
 
@@ -1023,7 +1064,8 @@ elif page == "🗺️ Geo Map":
     cols = st.columns(len(reg_stats))
     for i, (_, row) in enumerate(reg_stats.sort_values("avg_occ", ascending=False).iterrows()):
         rate = row["avg_occ"]
-        color = occ_color(rate)
+        dcolor = DISTRICT_COLORS.get(row["region"], "#888888")
+        occ_col = occ_color(rate)
         status = "HIGH DEMAND" if rate > 0.85 else ("ON TARGET" if rate >= 0.70 else "UNDERUTILIZED")
         action = row["top_action"]
         action_icon = {"increase": "⬆", "decrease": "⬇", "hold": "→"}.get(action, "→")
@@ -1031,13 +1073,13 @@ elif page == "🗺️ Geo Map":
         peak_label = f"{peak_h % 12 or 12}{'am' if peak_h < 12 else 'pm'}"
         with cols[i]:
             st.markdown(f"""
-            <div style="background:#1a2035;border:1px solid {color}40;border-top:3px solid {color};
+            <div style="background:#1a2035;border:1px solid {dcolor}50;border-top:3px solid {dcolor};
                         border-radius:8px;padding:14px 16px;text-align:center">
-                <div style="font-size:10px;color:#7b8db0;font-weight:600;letter-spacing:.05em;margin-bottom:4px">{row['region'].upper()}</div>
-                <div style="font-size:28px;font-weight:700;color:{color};margin:4px 0">{rate:.0%}</div>
-                <div style="font-size:10px;color:{color};font-weight:600">{status}</div>
+                <div style="font-size:10px;color:{dcolor};font-weight:600;letter-spacing:.05em;margin-bottom:4px">{row['region'].upper()}</div>
+                <div style="font-size:28px;font-weight:700;color:{occ_col};margin:4px 0">{rate:.0%}</div>
+                <div style="font-size:10px;color:{occ_col};font-weight:600">{status}</div>
                 <div style="font-size:11px;color:#7b8db0;margin-top:6px">{int(row['avg_spaces']):,} spaces</div>
                 <div style="font-size:11px;color:#7b8db0">Peak: {peak_label}</div>
-                <div style="font-size:11px;color:{color};margin-top:4px">{action_icon} {action}</div>
+                <div style="font-size:11px;color:{occ_col};margin-top:4px">{action_icon} {action}</div>
             </div>
             """, unsafe_allow_html=True)

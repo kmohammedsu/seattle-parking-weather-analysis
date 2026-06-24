@@ -2,17 +2,20 @@ import pandas as pd
 import numpy as np
 import json
 from pathlib import Path
+from shapely.geometry import shape, Point
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = ROOT / "data"
 
-PARKING_FILE  = DATA_DIR / "live_parking_occupancy.csv"
-WEATHER_FILE  = DATA_DIR / "processed_weather_data.csv"
-EVENTS_FILE   = DATA_DIR / "seattle_events.csv"
-PERMITS_FILE  = DATA_DIR / "seattle_event_permits.csv"
-CLOSURES_FILE = DATA_DIR / "seattle_road_closures.csv"
-HOLIDAYS_FILE = DATA_DIR / "seattle_holidays.csv"
-OUTPUT_FILE   = DATA_DIR / "features.csv"
+PARKING_FILE      = DATA_DIR / "live_parking_occupancy.csv"
+WEATHER_FILE      = DATA_DIR / "processed_weather_data.csv"
+EVENTS_FILE       = DATA_DIR / "seattle_events.csv"
+PERMITS_FILE      = DATA_DIR / "seattle_event_permits.csv"
+CLOSURES_FILE     = DATA_DIR / "seattle_road_closures.csv"
+HOLIDAYS_FILE     = DATA_DIR / "seattle_holidays.csv"
+OUTPUT_FILE       = DATA_DIR / "features.csv"
+GEOJSON_FILE      = DATA_DIR / "seattle_5_neighborhoods.geojson"
+BLOCKFACE_COORDS  = DATA_DIR / "blockface_coords.json"
 
 VENUE_REGION = {
     "Lumen Field":          "International District",
@@ -20,68 +23,71 @@ VENUE_REGION = {
     "Climate Pledge Arena": "South Lake Union",
 }
 
-# Street-pattern rules ordered most-specific first; first match wins.
-# Blockface strings look like "10TH AVE BETWEEN E MADISON ST AND E SENECA ST"
-BLOCKFACE_RULES = [
-    # Ballard: NW-suffix streets and named Ballard roads
-    (" NW ",         "Ballard"),
-    (" NW B",        "Ballard"),   # "NW BETWEEN"
-    ("BALLARD AVE",  "Ballard"),
-    ("LEARY AVE",    "Ballard"),
-    ("NW MARKET",    "Ballard"),
-    # International District / SoDo: S-suffix streets south of downtown
-    (" AVE S ",      "International District"),
-    (" AVE S B",     "International District"),
-    ("1ST AVE S",    "International District"),
-    ("2ND AVE S",    "International District"),
-    ("3RD AVE S",    "International District"),
-    ("4TH AVE S",    "International District"),
-    ("5TH AVE S",    "International District"),
-    ("6TH AVE S",    "International District"),
-    ("S KING ST",    "International District"),
-    ("S JACKSON",    "International District"),
-    ("S ROYAL",      "International District"),
-    ("S ATLANTIC",   "International District"),
-    ("S LANDER",     "International District"),
-    ("S WELLER",     "International District"),
-    # Capitol Hill: E-prefix cross streets and Broadway/numbered avenues
-    ("E PIKE ST",    "Capitol Hill"),
-    ("E PINE ST",    "Capitol Hill"),
-    ("E OLIVE",      "Capitol Hill"),
-    ("E HOWELL",     "Capitol Hill"),
-    ("E DENNY",      "Capitol Hill"),
-    ("E MADISON",    "Capitol Hill"),
-    ("E SENECA",     "Capitol Hill"),
-    ("E SPRING",     "Capitol Hill"),
-    ("E UNION",      "Capitol Hill"),
-    ("BROADWAY",     "Capitol Hill"),
-    ("10TH AVE B",   "Capitol Hill"),
-    ("11TH AVE B",   "Capitol Hill"),
-    ("12TH AVE B",   "Capitol Hill"),
-    ("13TH AVE B",   "Capitol Hill"),
-    ("14TH AVE B",   "Capitol Hill"),
-    ("15TH AVE B",   "Capitol Hill"),
-    # South Lake Union: Westlake, Dexter, Mercer, Thomas, Harrison
-    ("WESTLAKE",     "South Lake Union"),
-    ("DEXTER",       "South Lake Union"),
-    ("MERCER ST",    "South Lake Union"),
-    ("THOMAS ST",    "South Lake Union"),
-    ("HARRISON ST",  "South Lake Union"),
-    ("REPUBLICAN",   "South Lake Union"),
-    ("VALLEY ST",    "South Lake Union"),
-    ("TERRY AVE",    "South Lake Union"),
-    ("BOREN AVE",    "South Lake Union"),
-    ("DENNY WAY",    "South Lake Union"),
-]
+# Build shapely polygon lookup from the neighborhood GeoJSON
+def _load_polygons():
+    if not GEOJSON_FILE.exists():
+        return {}
+    with open(GEOJSON_FILE) as f:
+        gj = json.load(f)
+    return {
+        feat["properties"]["neighborhood"]: shape(feat["geometry"])
+        for feat in gj["features"]
+    }
+
+def _load_blockface_coords():
+    if not BLOCKFACE_COORDS.exists():
+        return {}
+    with open(BLOCKFACE_COORDS) as f:
+        data = json.load(f)
+    return {rec["name"]: (rec["lat"], rec["lon"]) for rec in data["blockfaces"]}
+
+_POLYGONS  = _load_polygons()
+_BF_COORDS = _load_blockface_coords()
+
+
+def _point_to_region(lat: float, lon: float) -> str | None:
+    pt = Point(lon, lat)   # shapely uses (lon, lat)
+    for name, poly in _POLYGONS.items():
+        if poly.contains(pt):
+            return name
+    return None
+
+
+# Build a cached blockface→region lookup using real coordinates
+def _build_blockface_region_cache() -> dict[str, str]:
+    cache = {}
+    for bf_name, (lat, lon) in _BF_COORDS.items():
+        region = _point_to_region(lat, lon)
+        cache[bf_name] = region or "Downtown Seattle"
+    matched = sum(1 for v in cache.values() if v != "Downtown Seattle")
+    print(f"  Blockface geo-lookup: {matched}/{len(cache)} mapped to non-Downtown region")
+    return cache
+
+_BF_REGION_CACHE = _build_blockface_region_cache() if _POLYGONS and _BF_COORDS else {}
 
 
 def map_blockface_to_region(blockface: pd.Series) -> pd.Series:
+    if _BF_REGION_CACHE:
+        # Primary: exact name match against geocoded + polygon-tagged cache
+        mapped = blockface.map(_BF_REGION_CACHE)
+        hit_rate = mapped.notna().mean()
+        print(f"  Geo cache hit rate: {hit_rate:.0%}")
+        # Fill misses with "Downtown Seattle" (within paid meter zone = downtown)
+        return mapped.fillna("Downtown Seattle")
+    # Fallback (no GeoJSON or coords available): street-pattern matching
     upper = blockface.str.upper().fillna("")
     region = pd.Series("Downtown Seattle", index=blockface.index)
-    # Apply in reverse so first rule in the list takes precedence
-    for keyword, reg in reversed(BLOCKFACE_RULES):
-        mask = upper.str.contains(keyword, regex=False)
-        region = region.where(~mask, reg)
+    FALLBACK_RULES = [
+        (" NW ", "Ballard"), ("BALLARD AVE", "Ballard"), ("NW MARKET", "Ballard"),
+        (" AVE S ", "International District"), ("S JACKSON", "International District"),
+        ("S KING ST", "International District"), ("S LANDER", "International District"),
+        ("E PIKE ST", "Capitol Hill"), ("E MADISON", "Capitol Hill"),
+        ("BROADWAY", "Capitol Hill"), ("E PINE ST", "Capitol Hill"),
+        ("WESTLAKE", "South Lake Union"), ("MERCER ST", "South Lake Union"),
+        ("DEXTER", "South Lake Union"),
+    ]
+    for keyword, reg in reversed(FALLBACK_RULES):
+        region = region.where(~upper.str.contains(keyword, regex=False), reg)
     return region
 
 
