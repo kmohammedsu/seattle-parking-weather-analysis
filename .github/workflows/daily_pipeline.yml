@@ -45,6 +45,7 @@ jobs:
           git add data/features.csv data/pricing_recommendations.csv \
                   data/revenue_summary.csv data/revenue_by_region_hour.csv \
                   last_run.json logs/pipeline.log \
+                  models/parking_demand_lgbm.pkl \
                   models/performance/final_model_performance.csv \
                   models/feature_columns.json || true
           git diff --cached --quiet || git commit -m "chore: daily pipeline update $(date -u +%Y-%m-%d)"

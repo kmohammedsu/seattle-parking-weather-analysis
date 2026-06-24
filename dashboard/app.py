@@ -177,14 +177,6 @@ def load_model():
     model_file = MODELS_DIR / "parking_demand_lgbm.pkl"
     feat_file = MODELS_DIR / "feature_columns.json"
     if not model_file.exists():
-        try:
-            import sys
-            sys.path.insert(0, str(ROOT))
-            from scripts.upload_model import download_model
-            download_model(MODELS_DIR)
-        except Exception:
-            pass
-    if not model_file.exists():
         return None, None
     with open(model_file, "rb") as f:
         model = pickle.load(f)

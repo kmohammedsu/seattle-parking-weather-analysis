@@ -13,8 +13,7 @@ data/*.pkl
 # Generated outputs ARE committed (features, pricing, revenue, ROI)
 # so the dashboard works without re-running the pipeline
 
-# Model files — stored on Hugging Face Hub
-models/*.pkl
+# Model files — tracked via Git LFS
 models/performance/scaler.pkl
 
 # Pipeline state
