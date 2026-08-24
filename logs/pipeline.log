@@ -90,3 +90,145 @@
 [2026-06-22 18:39:26] ------------------------------------------------------------
 [2026-06-22 18:39:26] Pipeline complete: 6/7 steps succeeded
 [2026-06-22 18:39:26] Failed steps: parking
+[2026-06-23 11:45:42] ============================================================
+[2026-06-23 11:45:42] Seattle Parking Intelligence — Pipeline Start
+[2026-06-23 11:45:42] ============================================================
+[2026-06-23 11:45:42] ▶ Fetch weather
+[2026-06-23 11:45:51]   ✓ Fetch weather done
+[2026-06-23 11:45:51] ▶ Process weather data
+[2026-06-23 11:45:52]   ✓ Process weather data done
+[2026-06-23 11:45:52] ▶ Fetch live parking
+[2026-06-23 11:45:52]   ✓ Fetch live parking done
+[2026-06-23 11:45:52] ▶ Fetch events
+[2026-06-23 11:45:54]   ✓ Fetch events done
+[2026-06-23 11:45:54] ▶ Fetch city permits
+[2026-06-23 11:45:55]   ✓ Fetch city permits done
+[2026-06-23 11:45:55] ▶ Fetch road closures
+[2026-06-23 11:45:55]   ✓ Fetch road closures done
+[2026-06-23 11:45:55] ▶ Build holiday calendar
+[2026-06-23 11:45:55]   ✓ Build holiday calendar done
+[2026-06-23 11:45:55] ▶ Aggregate features
+[2026-06-23 11:45:55]   ✓ Aggregate features done
+[2026-06-23 11:45:55] ------------------------------------------------------------
+[2026-06-23 11:45:55] Pipeline complete: 8/8 steps succeeded
+[2026-06-23 11:45:55] All steps complete. Ready for model training.
+[2026-06-23 14:28:44] ============================================================
+[2026-06-23 14:28:44] Seattle Parking Intelligence — Pipeline Start
+[2026-06-23 14:28:44] ============================================================
+[2026-06-23 14:28:44] ▶ Fetch weather
+[2026-06-23 14:28:44]   ✓ Fetch weather done
+[2026-06-23 14:28:44] ▶ Process weather data
+[2026-06-23 14:28:45]   ✓ Process weather data done
+[2026-06-23 14:28:45] ▶ Fetch live parking
+[2026-06-23 14:28:46]   ✓ Fetch live parking done
+[2026-06-23 14:28:46] ▶ Fetch events
+[2026-06-23 14:28:46]   ✓ Fetch events done
+[2026-06-23 14:28:46] ▶ Fetch city permits
+[2026-06-23 14:28:47]   ✓ Fetch city permits done
+[2026-06-23 14:28:47] ▶ Fetch road closures
+[2026-06-23 14:28:47]   ✓ Fetch road closures done
+[2026-06-23 14:28:47] ▶ Build holiday calendar
+[2026-06-23 14:28:48]   ✓ Build holiday calendar done
+[2026-06-23 14:28:48] ▶ Aggregate features
+[2026-06-23 14:28:53]   ✓ Aggregate features done
+[2026-06-23 14:28:53] ▶ Train model
+[2026-06-23 14:28:54]   ✓ Train model done
+[2026-06-23 14:28:54] ▶ Pricing recommendations
+[2026-06-23 14:28:54]   ✓ Pricing recommendations done
+[2026-06-23 14:28:54] ▶ Revenue analysis
+[2026-06-23 14:28:54]   ✓ Revenue analysis done
+[2026-06-23 14:28:54] ▶ Infrastructure ROI
+[2026-06-23 14:28:54]   ✓ Infrastructure ROI done
+[2026-06-23 14:28:54] ------------------------------------------------------------
+[2026-06-23 14:28:54] Pipeline complete: 12/12 steps succeeded
+[2026-06-23 14:28:54] All steps complete.
+[2026-06-23 14:30:40] ============================================================
+[2026-06-23 14:30:40] Seattle Parking Intelligence — Pipeline Start
+[2026-06-23 14:30:40] ============================================================
+[2026-06-23 14:30:40] ▶ Fetch weather
+[2026-06-23 14:30:41]   ✓ Fetch weather done
+[2026-06-23 14:30:41] ▶ Process weather data
+[2026-06-23 14:31:15]   ✓ Process weather data done
+[2026-06-23 14:31:15] ▶ Fetch live parking
+[2026-06-23 14:31:15]   ✓ Fetch live parking done
+[2026-06-23 14:31:15] ▶ Fetch events
+[2026-06-23 14:31:16]   ✓ Fetch events done
+[2026-06-23 14:31:16] ▶ Fetch city permits
+[2026-06-23 14:31:17]   ✓ Fetch city permits done
+[2026-06-23 14:31:17] ▶ Fetch road closures
+[2026-06-23 14:31:18]   ✓ Fetch road closures done
+[2026-06-23 14:31:18] ▶ Build holiday calendar
+[2026-06-23 14:31:18]   ✓ Build holiday calendar done
+[2026-06-23 14:31:18] ▶ Aggregate features
+[2026-06-23 14:31:23]   ✓ Aggregate features done
+[2026-06-23 14:31:23] ▶ Train model
+[2026-06-23 14:31:28]   ✓ Train model done
+[2026-06-23 14:31:28] ▶ Pricing recommendations
+[2026-06-23 14:31:28]   ✓ Pricing recommendations done
+[2026-06-23 14:31:28] ▶ Revenue analysis
+[2026-06-23 14:31:28]   ✓ Revenue analysis done
+[2026-06-23 14:31:28] ▶ Infrastructure ROI
+[2026-06-23 14:31:28]   ✓ Infrastructure ROI done
+[2026-06-23 14:31:28] ------------------------------------------------------------
+[2026-06-23 14:31:28] Pipeline complete: 12/12 steps succeeded
+[2026-06-23 14:31:28] All steps complete.
+[2026-08-23 23:02:35] ============================================================
+[2026-08-23 23:02:35] Seattle Parking Intelligence — Pipeline Start
+[2026-08-23 23:02:35] ============================================================
+[2026-08-23 23:02:35] ▶ Fetch weather
+[2026-08-23 23:02:39]   ✓ Fetch weather done
+[2026-08-23 23:02:39] ▶ Process weather data
+[2026-08-23 23:02:51]   ✓ Process weather data done
+[2026-08-23 23:02:51] ▶ Fetch live parking
+[2026-08-23 23:03:52]   ✓ Fetch live parking done
+[2026-08-23 23:03:52] ▶ Fetch events
+[2026-08-23 23:03:52]   ✓ Fetch events done
+[2026-08-23 23:03:52] ▶ Fetch city permits
+[2026-08-23 23:03:52]   ✓ Fetch city permits done
+[2026-08-23 23:03:52] ▶ Fetch road closures
+[2026-08-23 23:03:53]   ✓ Fetch road closures done
+[2026-08-23 23:03:53] ▶ Build holiday calendar
+[2026-08-23 23:03:53]   ✓ Build holiday calendar done
+[2026-08-23 23:03:53] ▶ Aggregate features
+[2026-08-23 23:03:53]   ✗ Aggregate features failed: No module named 'shapely'
+[2026-08-23 23:03:53] ▶ Train model
+[2026-08-23 23:03:55]   ✓ Train model done
+[2026-08-23 23:03:55] ▶ Pricing recommendations
+[2026-08-23 23:03:55]   ✓ Pricing recommendations done
+[2026-08-23 23:03:55] ▶ Revenue analysis
+[2026-08-23 23:03:56]   ✓ Revenue analysis done
+[2026-08-23 23:03:56] ▶ Infrastructure ROI
+[2026-08-23 23:03:56]   ✓ Infrastructure ROI done
+[2026-08-23 23:03:56] ------------------------------------------------------------
+[2026-08-23 23:03:56] Pipeline complete: 11/12 steps succeeded
+[2026-08-23 23:03:56] Failed steps: aggregate
+[2026-08-23 23:04:19] ============================================================
+[2026-08-23 23:04:19] Seattle Parking Intelligence — Pipeline Start
+[2026-08-23 23:04:19] ============================================================
+[2026-08-23 23:04:19] ▶ Fetch weather
+[2026-08-23 23:04:19]   ✓ Fetch weather done
+[2026-08-23 23:04:19] ▶ Process weather data
+[2026-08-23 23:04:21]   ✓ Process weather data done
+[2026-08-23 23:04:21] ▶ Fetch live parking
+[2026-08-23 23:05:21]   ✓ Fetch live parking done
+[2026-08-23 23:05:21] ▶ Fetch events
+[2026-08-23 23:05:21]   ✓ Fetch events done
+[2026-08-23 23:05:21] ▶ Fetch city permits
+[2026-08-23 23:05:22]   ✓ Fetch city permits done
+[2026-08-23 23:05:22] ▶ Fetch road closures
+[2026-08-23 23:05:23]   ✓ Fetch road closures done
+[2026-08-23 23:05:23] ▶ Build holiday calendar
+[2026-08-23 23:05:23]   ✓ Build holiday calendar done
+[2026-08-23 23:05:23] ▶ Aggregate features
+[2026-08-23 23:05:36]   ✓ Aggregate features done
+[2026-08-23 23:05:36] ▶ Train model
+[2026-08-23 23:05:37]   ✓ Train model done
+[2026-08-23 23:05:37] ▶ Pricing recommendations
+[2026-08-23 23:05:37]   ✓ Pricing recommendations done
+[2026-08-23 23:05:37] ▶ Revenue analysis
+[2026-08-23 23:05:38]   ✓ Revenue analysis done
+[2026-08-23 23:05:38] ▶ Infrastructure ROI
+[2026-08-23 23:05:38]   ✓ Infrastructure ROI done
+[2026-08-23 23:05:38] ------------------------------------------------------------
+[2026-08-23 23:05:38] Pipeline complete: 12/12 steps succeeded
+[2026-08-23 23:05:38] All steps complete.
