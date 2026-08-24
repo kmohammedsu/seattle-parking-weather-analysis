@@ -26,10 +26,11 @@ st.set_page_config(
 )
 
 # ── Design tokens ────────────────────────────────────────────────────────────
-# Civic decision-support system: Public Sans (the USWDS/federal government
-# typeface) for institutional UI text, Space Grotesk for headlines and data
-# numerals, a single restrained accent, and status conveyed by shape + text —
-# never color alone. All text/background pairs verified >= 4.5:1 (WCAG AA).
+# Civic decision-support system: Source Sans 3 for institutional UI text,
+# Lexend for headlines and data numerals — a pairing purpose-built for
+# enterprise/government/accessibility-focused products. A single restrained
+# accent, and status conveyed by shape + text — never color alone. All
+# text/background pairs verified >= 4.5:1 (WCAG AA).
 
 INK          = "#0F172A"  # headings / primary text
 BODY         = "#334155"  # body text
@@ -67,19 +68,21 @@ if "page" not in st.session_state:
 
 st.markdown(f"""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Public+Sans:ital,wght@0,400;0,500;0,600;0,700;0,800;1,500&family=Space+Grotesk:wght@500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Source+Sans+3:ital,wght@0,400;0,500;0,600;0,700;0,800;1,500&family=Lexend:wght@500;600;700;800&display=swap');
 
-html, body, [class*="css"] {{
-    font-family: 'Public Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+html, body, [class*="css"], [data-testid], [data-testid] * {{
+    font-family: 'Source Sans 3', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif !important;
 }}
 
-/* Space Grotesk carries headlines and data numerals — Public Sans stays on
-   UI text/labels/body. Two families, one job split, not decoration. */
+/* Lexend carries headlines and data numerals — Source Sans 3 stays on UI
+   text/labels/body. Both are purpose-built for accessibility/enterprise
+   government contexts; Lexend adds real presence without losing legibility.
+   Two families, one job split, not decoration. */
 h1, h2, h3, .stat-value, .region-value, .brand-title,
 [data-testid="stMarkdownContainer"] h1,
 [data-testid="stMarkdownContainer"] h2,
 [data-testid="stMarkdownContainer"] h3 {{
-    font-family: 'Space Grotesk', 'Public Sans', sans-serif !important;
+    font-family: 'Lexend', 'Source Sans 3', sans-serif !important;
 }}
 
 @media (prefers-reduced-motion: reduce) {{
@@ -134,7 +137,7 @@ p, span, label, div {{ color: {BODY}; }}
     width: 40px; height: 40px; border-radius: 10px;
     background: {INK};
     display: flex; align-items: center; justify-content: center;
-    color: #fff; font-weight: 800; font-size: 17px; font-family: 'Public Sans', sans-serif;
+    color: #fff; font-weight: 800; font-size: 17px; font-family: 'Source Sans 3', sans-serif;
     flex-shrink: 0;
 }}
 .brand-block {{ display: flex; align-items: center; gap: 12px; }}
@@ -210,7 +213,7 @@ div[class*="st-key-navitem_"] button:focus-visible {{
     color: {MUTED}; margin-bottom: 10px;
 }}
 .stat-cell.hero .stat-label {{ color: #94A3B8; }}
-.stat-value {{ font-size: 30px; font-weight: 700; color: {INK}; line-height: 1.05; letter-spacing: -0.01em; }}
+.stat-value {{ font-size: 30px; font-weight: 800; color: {INK}; line-height: 1.05; letter-spacing: -0.01em; }}
 .stat-cell.hero .stat-value {{ color: #fff; font-size: 42px; }}
 .stat-delta {{ font-size: 13px; margin-top: 8px; font-weight: 600; display: flex; align-items: center; gap: 5px; }}
 .stat-cell.hero .stat-delta {{ color: #CBD5E1; }}
@@ -262,7 +265,7 @@ div[class*="st-key-navitem_"] button:focus-visible {{
     box-shadow: 0 8px 20px -8px rgba(15,23,42,0.16);
 }}
 .region-name {{ font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--rc, {ACCENT}); margin-bottom: 6px; }}
-.region-value {{ font-size: 26px; font-weight: 700; color: {INK}; margin-bottom: 4px; }}
+.region-value {{ font-size: 26px; font-weight: 800; color: {INK}; margin-bottom: 4px; }}
 .region-sub {{ font-size: 12px; color: {MUTED}; }}
 
 /* ── Badge — text + icon, never color alone ──────────────────────────── */
@@ -368,8 +371,8 @@ def callout(text_html: str, kind: str = ""):
 PLOTLY_THEME = dict(
     paper_bgcolor="rgba(0,0,0,0)",
     plot_bgcolor="rgba(0,0,0,0)",
-    font=dict(color=BODY, size=12, family="Public Sans, sans-serif"),
-    title_font=dict(color=INK, size=15, family="Space Grotesk, Public Sans, sans-serif"),
+    font=dict(color=BODY, size=12, family="Source Sans 3, sans-serif"),
+    title_font=dict(color=INK, size=15, family="Lexend, Source Sans 3, sans-serif"),
     xaxis=dict(gridcolor=LINE, zeroline=False, linecolor=LINE),
     yaxis=dict(gridcolor=LINE, zeroline=False, linecolor=LINE),
     legend=dict(bgcolor="rgba(0,0,0,0)", bordercolor=LINE),
@@ -1185,7 +1188,7 @@ elif page == "Geo Map":
         peak_label = f"{peak_h % 12 or 12}{'am' if peak_h < 12 else 'pm'}"
 
         popup_html = f"""
-        <div style="font-family:'Public Sans',Arial,sans-serif;min-width:220px;background:{CARD};color:{BODY};
+        <div style="font-family:'Source Sans 3',Arial,sans-serif;min-width:220px;background:{CARD};color:{BODY};
                     border-radius:8px;padding:14px;border-left:4px solid {color};box-shadow:0 1px 4px rgba(15,23,42,0.12)">
             <div style="font-size:14px;font-weight:700;color:{color};margin-bottom:10px;
                         border-bottom:1px solid {LINE};padding-bottom:6px">
@@ -1253,7 +1256,7 @@ elif page == "Geo Map":
         folium.Marker(
             location=coords,
             icon=folium.DivIcon(
-                html=f"""<div style="font-family:'Public Sans',Arial,sans-serif;font-size:11px;font-weight:700;
+                html=f"""<div style="font-family:'Source Sans 3',Arial,sans-serif;font-size:11px;font-weight:700;
                                      color:white;text-align:center;width:80px;margin-left:-40px;
                                      text-shadow:0 1px 3px rgba(0,0,0,0.6)">
                             {row['avg_occ']:.0%}
