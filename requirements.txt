@@ -22,6 +22,7 @@ streamlit>=1.28
 holidays>=0.40
 tqdm>=4.64
 huggingface_hub>=0.20
+shapely>=2.0
 
 # Notebook support (optional, for local dev)
 notebook>=6.5
