@@ -5,6 +5,9 @@ on:
     - cron: "0 8 * * *"   # 8 AM UTC = midnight Seattle time
   workflow_dispatch:        # allow manual trigger from GitHub UI
 
+permissions:
+  contents: write   # needed to push the daily data/model commit
+
 jobs:
   pipeline:
     runs-on: ubuntu-latest

@@ -5,6 +5,9 @@ on:
     - cron: "0 9 * * 1"   # Monday 9 AM UTC = 1 AM Pacific
   workflow_dispatch:
 
+permissions:
+  contents: write   # needed to push the weekly report commit
+
 jobs:
   report:
     runs-on: ubuntu-latest
