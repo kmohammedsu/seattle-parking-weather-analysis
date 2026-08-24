@@ -1,3 +1,7 @@
-data/*.csv filter=lfs diff=lfs merge=lfs -text
+# Only large files the dashboard never reads go through LFS — everything
+# dashboard/app.py loads stays as plain git blobs so Streamlit Community
+# Cloud (which clones via plain git and does not reliably fetch LFS content)
+# can check them out without pointer-file breakage.
+data/Annual_Parking_Study_Data_20250220.csv filter=lfs diff=lfs merge=lfs -text
+data/Cleaned_Annual_Parking_Study_Data_20250220.csv filter=lfs diff=lfs merge=lfs -text
 data/merged_parking_weather_data.csv filter=lfs diff=lfs merge=lfs -text
-*.pkl filter=lfs diff=lfs merge=lfs -text
