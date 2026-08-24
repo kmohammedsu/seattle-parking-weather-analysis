@@ -23,13 +23,18 @@ def make_parking_df():
     })
 
 
-def test_map_blockface_to_region_downtown():
+def test_map_blockface_to_region_downtown(monkeypatch):
+    # Force the keyword fallback path — the real geo cache (built from
+    # checked-in geojson/coords data) would otherwise short-circuit these
+    # synthetic names to whatever the cache resolves, masking this logic.
+    monkeypatch.setattr(af, "_BF_REGION_CACHE", {})
     series = pd.Series(["DOWNTOWN 5TH AVE", "PIKE ST"])
     result = af.map_blockface_to_region(series)
     assert result.iloc[0] == "Downtown Seattle"
 
 
-def test_map_blockface_to_region_capitol_hill():
+def test_map_blockface_to_region_capitol_hill(monkeypatch):
+    monkeypatch.setattr(af, "_BF_REGION_CACHE", {})
     series = pd.Series(["CAPITOL HILL BROADWAY"])
     result = af.map_blockface_to_region(series)
     assert result.iloc[0] == "Capitol Hill"
