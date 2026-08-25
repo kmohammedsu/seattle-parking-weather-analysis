@@ -2,7 +2,7 @@
 Train LightGBM to predict occupancy per BLOCKFACE per hour.
 
 The model learns a demand curve for each individual blockface rather than for a
-broad neighbourhood, which is what makes per-meter pricing possible. Blockface
+broad neighborhood, which is what makes per-meter pricing possible. Blockface
 identity and the official parking area are passed as native LightGBM
 categoricals so the model can learn per-location baselines directly.
 

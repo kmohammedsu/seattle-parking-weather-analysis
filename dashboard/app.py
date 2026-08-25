@@ -44,7 +44,7 @@ WARN         = "#8A4B0C"
 BAD          = "#9C2626"
 
 # Seattle has 23 official paid parking areas — too many for hand-picked
-# colours, so assign deterministically from an accessible categorical ramp.
+# colors, so assign deterministically from an accessible categorical ramp.
 AREA_PALETTE = [
     "#0A5A8C", "#116149", "#9C2626", "#5B3A8E", "#8A4B0C",
     "#0E7A8C", "#7A1F5C", "#2F5F1F", "#8C3D0A", "#3D3D8C",
@@ -504,7 +504,7 @@ if not area_day.empty:
     meta_html += f'<span class="meta-pill">Data through <b>{area_day["date"].max():%b %d, %Y}</b></span>'
 if not meters.empty:
     meta_html += f'<span class="meta-pill"><b>{len(meters):,}</b> metered blocks</span>'
-    meta_html += f'<span class="meta-pill"><b>{meters["paidparkingarea"].nunique()}</b> neighbourhoods</span>'
+    meta_html += f'<span class="meta-pill"><b>{meters["paidparkingarea"].nunique()}</b> neighborhoods</span>'
 if perf:
     _r2 = perf.get("r2", 0)
     _grade, _why = accuracy_words(_r2)
@@ -609,7 +609,7 @@ if page == "Overview":
         <b>Why the city targets 70–85% full.</b> That range means a driver can
         almost always find a space on the block they want, without the street
         sitting wastefully empty. Too full and people circle the block hunting
-        for parking; too empty and the city is giving away kerb space it could
+        for parking; too empty and the city is giving away curb space it could
         be earning from.<br><br>
         <b>What that implies here.</b> Seattle is well below the range, so the
         municipal code points toward <b>charging less</b>, not more — raising
@@ -619,7 +619,7 @@ if page == "Overview":
         price</b> ("50&cent; less per hour"), never a final price tag.
     """)
 
-    section("Fullest neighbourhoods")
+    section("Fullest neighborhoods")
     area_stats = (
         meters.groupby("paidparkingarea")
         .apply(lambda g: pd.Series({
@@ -636,7 +636,7 @@ if page == "Overview":
     cols = st.columns(len(top))
     for i, (_, row) in enumerate(top.iterrows()):
         rate = row["occupancy"]
-        label, colour, ic = ACTION_LABEL[
+        label, color, ic = ACTION_LABEL[
             "increase" if rate > 0.85 else ("hold" if rate >= 0.70 else "decrease")
         ]
         with cols[i]:
@@ -644,13 +644,13 @@ if page == "Overview":
             <div class="region-cell" style="--rc:{area_color(row['paidparkingarea'])}">
                 <div class="region-name">{row['paidparkingarea']}</div>
                 <div class="region-value">{rate:.0%}</div>
-                <div style="margin:6px 0">{badge(label, colour, ic)}</div>
+                <div style="margin:6px 0">{badge(label, color, ic)}</div>
                 <div class="region-sub">{int(row['blockfaces'])} blocks &middot;
                     {int(row['spaces'])} spaces</div>
             </div>
             """, unsafe_allow_html=True)
 
-    section("How full each neighbourhood is")
+    section("How full each neighborhood is")
     fig = px.bar(
         area_stats.sort_values("occupancy"),
         x="occupancy", y="paidparkingarea", orientation="h",
@@ -661,11 +661,11 @@ if page == "Overview":
     fig.add_vrect(x0=0.70, x1=0.85, fillcolor="rgba(17,97,73,0.10)", line_width=0,
                   annotation_text="70–85% target band", annotation_position="top")
     fig.update_xaxes(tickformat=".0%", range=[0, 1])
-    fig.update_layout(title="Every neighbourhood, compared with the city's goal",
+    fig.update_layout(title="Every neighborhood, compared with the city's goal",
                       **PLOTLY_THEME)
     st.plotly_chart(fig, use_container_width=True)
     st.caption("The green band is the city's target. Bars to its left mean the "
-               "kerb is emptier than the city wants.")
+               "curb is emptier than the city wants.")
 
     if not profile.empty:
         section("When people actually park")
@@ -691,7 +691,7 @@ elif page == "Meters":
                "and whether its price should change")
 
     f1, f2, f3 = st.columns([2, 1.4, 1.4])
-    area_pick = f1.selectbox("Neighbourhood", ["All areas"] + sorted(meters["paidparkingarea"].unique()))
+    area_pick = f1.selectbox("Neighborhood", ["All areas"] + sorted(meters["paidparkingarea"].unique()))
     action_label = f2.selectbox("Show blocks that should",
                                 ["Any", "Charge less", "Stay the same", "Charge more"])
     action_pick = {"Charge less": "decrease", "Stay the same": "hold",
@@ -743,15 +743,15 @@ elif page == "Meters":
     table["primary_action"] = table["primary_action"].map(
         {"increase": "Charge more", "decrease": "Charge less",
          "hold": "Leave as is"}).fillna("No data")
-    table.columns = ["Block", "Neighbourhood", "Typically full", "At its busiest",
+    table.columns = ["Block", "Neighborhood", "Typically full", "At its busiest",
                      "Busiest hour", "Spaces", "Suggested price change", "What to do"]
 
-    def colour_action(v):
+    def color_action(v):
         return {"Charge more": f"background-color:#FBEEEE;color:{BAD}",
                 "Charge less": f"background-color:#EAF1F6;color:{ACCENT}",
                 "Leave as is": f"background-color:#EAF3EF;color:{GOOD}"}.get(v, f"color:{MUTED}")
 
-    st.dataframe(table.style.map(colour_action, subset=["What to do"]),
+    st.dataframe(table.style.map(color_action, subset=["What to do"]),
                  use_container_width=True, hide_index=True, height=460)
     st.caption("\"Suggested price change\" is an adjustment to the price already "
                "posted on that block — not a new total price.")
@@ -816,7 +816,7 @@ elif page == "Pricing":
          "delta": "inside the 70–85% target", "delta_class": "kpi-good"},
     ])
 
-    section("Suggested price change, by neighbourhood")
+    section("Suggested price change, by neighborhood")
     by_area = (
         meters.groupby("paidparkingarea")
         .agg(mean_adjustment=("mean_adjustment", "mean"),
@@ -837,7 +837,7 @@ elif page == "Pricing":
     st.caption("Bars to the left mean the price should come down; to the right, up.")
 
     section("How the suggestion changes through the day")
-    ha = st.selectbox("Neighbourhood", ["All areas"] + sorted(recs["paidparkingarea"].unique()))
+    ha = st.selectbox("Neighborhood", ["All areas"] + sorted(recs["paidparkingarea"].unique()))
     hv = recs if ha == "All areas" else recs[recs["paidparkingarea"] == ha]
     hourly = hv.groupby("hour_of_day").agg(
         occupancy=("avg_occupancy", "mean"),
@@ -867,7 +867,7 @@ elif page == "Pricing":
 
 elif page == "Utilization":
     st.title("How full is Seattle's parking?")
-    st.caption("How much of the city's kerb space actually gets used, "
+    st.caption("How much of the city's curb space actually gets used, "
                "and what it would take to hit the target")
 
     if util.empty:
@@ -895,7 +895,7 @@ elif page == "Utilization":
         During paid hours roughly <b>{used_per_hour:,.0f} spaces are occupied</b>
         at any moment, against a city target that would put about
         <b>{used_per_hour + empty_per_hour:,.0f}</b> in use. Every empty space is
-        kerb space the city is neither earning from nor giving to a driver who
+        curb space the city is neither earning from nor giving to a driver who
         wants it.
       </div>
     </div>
@@ -946,7 +946,7 @@ elif page == "Utilization":
                "but did not.")
 
     if not area_hr.empty:
-        section("Which neighbourhoods have the most empty space")
+        section("Which neighborhoods have the most empty space")
         gap = (area_hr.groupby("paidparkingarea")
                .agg(unsold=("unsold_space_hours", "mean"),
                     occupancy=("avg_occupancy", "mean"))
@@ -982,15 +982,15 @@ elif page == "Infrastructure":
          "delta_class": "kpi-good" if len(viable) else "kpi-warn", "hero": True},
         {"label": "Cheapest to justify", "value": f"${cheapest:.2f}/hr",
          "delta": "price it would need to charge"},
-        {"label": "Neighbourhoods checked",
+        {"label": "Neighborhoods checked",
          "value": f"{roi_df['paidparkingarea'].nunique()}"},
     ])
 
     if viable.empty:
         callout("""
             <b>Right now, building more parking would not pay off anywhere.</b>
-            New parking only makes sense where the existing kerb is already close
-            to full — and no Seattle neighbourhood is. Adding spaces next to
+            New parking only makes sense where the existing curb is already close
+            to full — and no Seattle neighborhood is. Adding spaces next to
             blocks that sit two-thirds empty would leave the city paying off a
             loan on parking nobody uses. The table below shows what each project
             <em>would</em> need to charge if demand recovered later.
@@ -1022,7 +1022,7 @@ elif page == "Infrastructure":
     tbl["breakeven_rate_per_hour"] = tbl["breakeven_rate_per_hour"].map("${:.2f}".format)
     tbl["infra_type"] = tbl["infra_type"].str.replace("_", " ").str.title()
     tbl["viable"] = tbl["viable"].map({True: "Yes", False: "No"})
-    tbl.columns = ["Neighbourhood", "Type", "New spaces", "How full it is now",
+    tbl.columns = ["Neighborhood", "Type", "New spaces", "How full it is now",
                    "Cost to build", "Cost each year",
                    "Price needed to break even", "Worth building?"]
     st.dataframe(tbl, use_container_width=True, hide_index=True, height=420)
@@ -1036,7 +1036,7 @@ elif page == "Map":
     from folium.plugins import MarkerCluster
 
     st.title("Map of every metered block")
-    st.caption("Colour shows how full a block usually is. Zoom in to split the "
+    st.caption("Color shows how full a block usually is. Zoom in to split the "
                "groups apart, then click any block for its details.")
 
     geo = meters.dropna(subset=["lat", "lon"])
@@ -1045,7 +1045,7 @@ elif page == "Map":
         st.stop()
 
     mc1, mc2 = st.columns([2, 2])
-    map_area = mc1.selectbox("Neighbourhood",
+    map_area = mc1.selectbox("Neighborhood",
                              ["All areas"] + sorted(geo["paidparkingarea"].unique()))
     map_action = mc2.selectbox("Show", ["All blocks", "Too empty (under 70% full)",
                                         "Just right (70–85% full)",
@@ -1071,12 +1071,12 @@ elif page == "Map":
         zoom_start=15 if map_area != "All areas" else 13,
         tiles="CartoDB positron", prefer_canvas=True,
     )
-    # Cluster colour must mean OCCUPANCY, not marker count. MarkerCluster's
+    # Cluster color must mean OCCUPANCY, not marker count. MarkerCluster's
     # default green->orange->red ramp encodes how many markers are inside,
     # which collides head-on with the occupancy palette used everywhere else
     # (blue = under target, green = on target, red = over). A dense downtown
     # cluster rendered red would read as "over capacity" when it is in fact
-    # mostly empty blocks. This colours each cluster by the dominant status of
+    # mostly empty blocks. This colors each cluster by the dominant status of
     # its children and shows the count as a label instead.
     icon_create = f"""
     function(cluster) {{
@@ -1085,12 +1085,12 @@ elif page == "Map":
             var c = (mk.options && mk.options.fillColor) || '{ACCENT}';
             counts[c] = (counts[c] || 0) + 1;
         }});
-        var colour = '{ACCENT}', best = -1;
-        for (var c in counts) {{ if (counts[c] > best) {{ best = counts[c]; colour = c; }} }}
+        var color = '{ACCENT}', best = -1;
+        for (var c in counts) {{ if (counts[c] > best) {{ best = counts[c]; color = c; }} }}
         var n = cluster.getChildCount();
         var size = n < 10 ? 34 : (n < 100 ? 42 : 50);
         return new L.DivIcon({{
-            html: '<div style="background:' + colour + ';width:' + size + 'px;height:' + size
+            html: '<div style="background:' + color + ';width:' + size + 'px;height:' + size
                 + 'px;line-height:' + size + 'px;border-radius:50%;color:#fff;'
                 + 'font-family:Source Sans 3,sans-serif;font-weight:700;'
                 + 'font-size:' + (n < 100 ? 13 : 12) + 'px;text-align:center;'
@@ -1106,7 +1106,7 @@ elif page == "Map":
         name="Blockfaces",
         icon_create_function=icon_create,
         options={
-            # Downtown packs hundreds of blockfaces into a few hundred metres;
+            # Downtown packs hundreds of blockfaces into a few hundred meters;
             # a tight radius breaks it into street-level groups instead of one blob.
             "maxClusterRadius": 45,
             # Past this zoom show every blockface individually — the whole point
@@ -1120,12 +1120,12 @@ elif page == "Map":
 
     for _, r in view.iterrows():
         occ = r["avg_occupancy"]
-        colour = BAD if occ > 0.85 else (GOOD if occ >= 0.70 else ACCENT)
+        color = BAD if occ > 0.85 else (GOOD if occ >= 0.70 else ACCENT)
         status = ("Too crowded" if occ > 0.85
                   else ("Just right" if occ >= 0.70 else "Too empty"))
         popup = f"""
         <div style="font-family:'Source Sans 3',Arial,sans-serif;min-width:230px">
-          <div style="font-size:13px;font-weight:700;color:{colour};
+          <div style="font-size:13px;font-weight:700;color:{color};
                       border-bottom:1px solid {LINE};padding-bottom:6px;margin-bottom:8px">
             {r['blockfacename']}
           </div>
@@ -1133,24 +1133,24 @@ elif page == "Map":
             <tr><td style="color:{MUTED}">Area</td>
                 <td style="text-align:right;font-weight:700">{r['paidparkingarea']}</td></tr>
             <tr><td style="color:{MUTED}">Usually full</td>
-                <td style="text-align:right;font-weight:700;color:{colour}">{occ:.0%}</td></tr>
+                <td style="text-align:right;font-weight:700;color:{color}">{occ:.0%}</td></tr>
             <tr><td style="color:{MUTED}">Busiest hour</td>
                 <td style="text-align:right;font-weight:700">{fmt_hour(r['peak_hour'])}</td></tr>
             <tr><td style="color:{MUTED}">Spaces</td>
                 <td style="text-align:right;font-weight:700">{int(r['spaces'])}</td></tr>
             <tr><td style="color:{MUTED}">Suggested change</td>
-                <td style="text-align:right;font-weight:700;color:{colour}">
+                <td style="text-align:right;font-weight:700;color:{color}">
                     {adjustment_text(r['mean_adjustment'])}</td></tr>
           </table>
-          <div style="margin-top:8px;padding:4px 8px;background:{colour}14;
-                      border-radius:4px;font-size:11px;color:{colour};
+          <div style="margin-top:8px;padding:4px 8px;background:{color}14;
+                      border-radius:4px;font-size:11px;color:{color};
                       font-weight:700;text-align:center">{status}</div>
         </div>"""
 
         folium.CircleMarker(
             location=[r["lat"], r["lon"]],
             radius=4 + min(float(r["spaces"]), 40) / 6,
-            color=colour, fill=True, fill_color=colour, fill_opacity=0.75,
+            color=color, fill=True, fill_color=color, fill_opacity=0.75,
             weight=1.5, opacity=0.9,
             popup=folium.Popup(popup, max_width=280),
             tooltip=f"{r['blockfacename']} — {occ:.0%}",
@@ -1158,9 +1158,9 @@ elif page == "Map":
 
     st_folium(m, use_container_width=True, height=600, returned_objects=[])
 
-    section("What the colours mean")
+    section("What the colors mean")
     l1, l2, l3 = st.columns(3)
-    for col, (lbl, colour, desc) in zip(
+    for col, (lbl, color, desc) in zip(
         [l1, l2, l3],
         [("Too empty", ACCENT, "Under 70% full — consider charging less "
                                 "so more drivers use it"),
@@ -1170,7 +1170,7 @@ elif page == "Map":
     ):
         with col:
             st.markdown(
-                f'<div class="region-cell" style="--rc:{colour}">'
-                f'<div class="region-name" style="color:{colour}">{lbl}</div>'
+                f'<div class="region-cell" style="--rc:{color}">'
+                f'<div class="region-name" style="color:{color}">{lbl}</div>'
                 f'<div class="region-sub">{desc}</div></div>',
                 unsafe_allow_html=True)
