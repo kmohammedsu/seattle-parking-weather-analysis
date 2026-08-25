@@ -246,6 +246,22 @@ div[class*="st-key-navitem_"] button:focus-visible {{
 .spark-row .spark-bar:nth-child(13) {{ animation-delay: 300ms; }}
 .spark-row .spark-bar:nth-child(14) {{ animation-delay: 325ms; }}
 
+/* ── Plain-language verdict block ────────────────────────────────────── */
+.verdict {{
+    background: {CARD};
+    border: 1px solid {LINE};
+    border-left: 4px solid {ACCENT};
+    border-radius: 10px;
+    padding: 18px 22px;
+    margin: 4px 0 22px 0;
+}}
+.verdict-lead {{
+    font-family: 'Lexend', sans-serif;
+    font-size: 19px; font-weight: 700; color: {INK}; margin-bottom: 8px;
+}}
+.verdict-body {{ font-size: 14.5px; line-height: 1.65; color: {BODY}; }}
+.verdict-body b {{ color: {INK}; }}
+
 /* ── Section label ────────────────────────────────────────────────────── */
 .section-label {{
     display: flex; align-items: center; gap: 8px;
@@ -458,6 +474,23 @@ def fmt_hour(h):
     return f"{h % 12 or 12}{'am' if h < 12 else 'pm'}"
 
 
+def plain_count(n, singular, plural=None):
+    """'1 block' / '950 blocks' — never a bare number with no noun."""
+    plural = plural or singular + "s"
+    return f"{int(n):,} {singular if n == 1 else plural}"
+
+
+def accuracy_words(r2):
+    """Translate R-squared into something a non-analyst can act on."""
+    if r2 >= 0.85:
+        return "Strong", "predictions closely track what actually happened"
+    if r2 >= 0.60:
+        return "Moderate", "predictions get the direction right, with some spread"
+    if r2 >= 0.40:
+        return "Fair", "useful for spotting patterns, not for precise forecasts"
+    return "Limited", "treat predictions as rough indicators only"
+
+
 def adjustment_text(v):
     if pd.isna(v) or v == 0:
         return "no change"
@@ -470,10 +503,14 @@ meta_html = ""
 if not area_day.empty:
     meta_html += f'<span class="meta-pill">Data through <b>{area_day["date"].max():%b %d, %Y}</b></span>'
 if not meters.empty:
-    meta_html += f'<span class="meta-pill"><b>{len(meters):,}</b> blockfaces</span>'
-    meta_html += f'<span class="meta-pill"><b>{meters["paidparkingarea"].nunique()}</b> official areas</span>'
+    meta_html += f'<span class="meta-pill"><b>{len(meters):,}</b> metered blocks</span>'
+    meta_html += f'<span class="meta-pill"><b>{meters["paidparkingarea"].nunique()}</b> neighbourhoods</span>'
 if perf:
-    meta_html += f'<span class="meta-pill">Model R&sup2; <b>{perf.get("r2", 0):.3f}</b></span>'
+    _r2 = perf.get("r2", 0)
+    _grade, _why = accuracy_words(_r2)
+    _tip = f"Forecast accuracy: {_why} (R-squared {_r2:.2f})"
+    meta_html += (f'<span class="meta-pill" title="{_tip}">'
+                  f'Forecast <b>{_grade}</b></span>')
 
 st.markdown(f"""
 <div class="topbar">
@@ -517,8 +554,8 @@ if meters.empty:
 
 if page == "Overview":
     st.title("Citywide overview")
-    st.caption("Every paid blockface in Seattle, graded against the SMC 11.16.121 "
-               "target band of 70–85% occupancy")
+    st.caption("How well Seattle's metered parking is being used, measured against "
+               "the city's goal of keeping blocks 70–85% full")
 
     citywide_occ = float((meters["avg_occupancy"] * meters["spaces"]).sum() / meters["spaces"].sum())
     counts = meters["primary_action"].value_counts()
@@ -530,34 +567,59 @@ if page == "Overview":
         if not area_day.empty else [citywide_occ] * 14
     )
 
+    in_use = int(total_spaces * citywide_occ)
+    empty_now = total_spaces - in_use
+    short_of_target = max(0, int(total_spaces * 0.80) - in_use)
+
+    st.markdown(f"""
+    <div class="verdict">
+      <div class="verdict-lead">Most of Seattle's paid parking sits empty.</div>
+      <div class="verdict-body">
+        Across the city's {total_spaces:,} metered spaces, only about
+        <b>{in_use:,} are in use</b> at any given moment during paid hours —
+        roughly <b>3 in 10</b>. That leaves about <b>{empty_now:,} spaces empty</b>.
+        The city aims for 70–85% full, so today it is
+        <b>{short_of_target:,} parked cars short</b> of that goal.
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
+
     c1, c2 = st.columns([1.7, 1])
     with c1:
         hero_with_sparkline(
-            "Citywide occupancy",
-            f"{citywide_occ:.1%}",
-            f'{icon("down", "#CBD5E1")} Below the 70% target floor &middot; 14-day trend',
+            "Spaces empty right now",
+            f"{empty_now:,}",
+            f'{icon("down", "#CBD5E1")} of {total_spaces:,} metered spaces &middot; '
+            f'{citywide_occ:.0%} occupied &middot; 14-day trend',
             trend,
         )
     with c2:
         cc1, cc2 = st.columns(2)
         with cc1:
-            stat_cell("On target", f"{on_target}", f"of {len(meters):,} blockfaces",
+            stat_cell("Blocks at the right price", f"{on_target}",
+                      f"of {len(meters):,} — the rest need a change",
                       "kpi-good" if on_target else "kpi-warn")
         with cc2:
-            stat_cell("Paid spaces", f"{total_spaces:,}", "citywide", "kpi-neutral")
-        stat_cell("Below target", f"{int(counts.get('decrease', 0)):,}",
-                  "blockfaces under 70% occupancy", "kpi-warn")
+            stat_cell("Metered spaces", f"{total_spaces:,}",
+                      "across the whole city", "kpi-neutral")
+        stat_cell("Blocks too empty", f"{int(counts.get('decrease', 0)):,}",
+                  "less than 70% full — consider charging less", "kpi-warn")
 
     callout("""
-        <b>How to read this.</b> Seattle's paid parking is running well below the
-        70–85% band the municipal code targets. Under SMC 11.16.121 that points
-        toward <b>lower</b> rates to attract parkers, not higher ones — raising
-        prices on half-empty blocks would push utilization further down.
-        Rate changes below are expressed as an adjustment to whatever rate is
-        currently posted, because Seattle publishes no per-meter rate data.
+        <b>Why the city targets 70–85% full.</b> That range means a driver can
+        almost always find a space on the block they want, without the street
+        sitting wastefully empty. Too full and people circle the block hunting
+        for parking; too empty and the city is giving away kerb space it could
+        be earning from.<br><br>
+        <b>What that implies here.</b> Seattle is well below the range, so the
+        municipal code points toward <b>charging less</b>, not more — raising
+        prices on a half-empty block would only push more drivers away.<br><br>
+        <b>About the prices shown.</b> Seattle does not publish what each meter
+        currently charges, so every figure is a <b>change to the existing
+        price</b> ("50&cent; less per hour"), never a final price tag.
     """)
 
-    section("Areas needing attention")
+    section("Fullest neighbourhoods")
     area_stats = (
         meters.groupby("paidparkingarea")
         .apply(lambda g: pd.Series({
@@ -583,12 +645,12 @@ if page == "Overview":
                 <div class="region-name">{row['paidparkingarea']}</div>
                 <div class="region-value">{rate:.0%}</div>
                 <div style="margin:6px 0">{badge(label, colour, ic)}</div>
-                <div class="region-sub">{int(row['blockfaces'])} blockfaces &middot;
+                <div class="region-sub">{int(row['blockfaces'])} blocks &middot;
                     {int(row['spaces'])} spaces</div>
             </div>
             """, unsafe_allow_html=True)
 
-    section("Occupancy by area")
+    section("How full each neighbourhood is")
     fig = px.bar(
         area_stats.sort_values("occupancy"),
         x="occupancy", y="paidparkingarea", orientation="h",
@@ -599,12 +661,14 @@ if page == "Overview":
     fig.add_vrect(x0=0.70, x1=0.85, fillcolor="rgba(17,97,73,0.10)", line_width=0,
                   annotation_text="70–85% target band", annotation_position="top")
     fig.update_xaxes(tickformat=".0%", range=[0, 1])
-    fig.update_layout(title="Every official paid parking area vs the target band",
+    fig.update_layout(title="Every neighbourhood, compared with the city's goal",
                       **PLOTLY_THEME)
     st.plotly_chart(fig, use_container_width=True)
+    st.caption("The green band is the city's target. Bars to its left mean the "
+               "kerb is emptier than the city wants.")
 
     if not profile.empty:
-        section("When demand actually happens")
+        section("When people actually park")
         DAYS = {0: "Mon", 1: "Tue", 2: "Wed", 3: "Thu", 4: "Fri", 5: "Sat", 6: "Sun"}
         piv = (profile.groupby(["hour_of_day", "day_of_week"])["avg_occupancy_rate"]
                .mean().unstack(fill_value=0))
@@ -612,7 +676,7 @@ if page == "Overview":
         fig2 = px.imshow(
             piv, labels={"x": "Day", "y": "Hour", "color": "Occupancy"},
             color_continuous_scale=[[0, "#F1F5F9"], [1, ACCENT]], zmin=0, zmax=1,
-            title="Citywide occupancy — hour x day", height=420,
+            title="How full the city's parking is, by hour and day", height=420,
         )
         fig2.update_layout(**PLOTLY_THEME)
         fig2.update_coloraxes(colorbar=dict(tickformat=".0%", len=0.8))
@@ -622,16 +686,18 @@ if page == "Overview":
 # ── Page: Meters (per-blockface drill-down) ──────────────────────────────────
 
 elif page == "Meters":
-    st.title("Blockface detail")
-    st.caption("Every metered blockface, its measured occupancy, and the rate "
-               "adjustment SMC 11.16.121 implies")
+    st.title("Look up a block")
+    st.caption("Search any metered block in Seattle to see how full it gets "
+               "and whether its price should change")
 
     f1, f2, f3 = st.columns([2, 1.4, 1.4])
-    area_pick = f1.selectbox("Area", ["All areas"] + sorted(meters["paidparkingarea"].unique()))
-    action_pick = f2.selectbox("Recommended action",
-                               ["All", "decrease", "hold", "increase"])
+    area_pick = f1.selectbox("Neighbourhood", ["All areas"] + sorted(meters["paidparkingarea"].unique()))
+    action_label = f2.selectbox("Show blocks that should",
+                                ["Any", "Charge less", "Stay the same", "Charge more"])
+    action_pick = {"Charge less": "decrease", "Stay the same": "hold",
+                   "Charge more": "increase"}.get(action_label, "All")
     sort_pick = f3.selectbox("Sort by",
-                             ["Lowest occupancy", "Highest occupancy", "Most spaces"])
+                             ["Emptiest first", "Fullest first", "Most spaces"])
 
     view = meters.copy()
     if area_pick != "All areas":
@@ -640,29 +706,31 @@ elif page == "Meters":
         view = view[view["primary_action"] == action_pick]
 
     view = view.sort_values(
-        {"Lowest occupancy": "avg_occupancy",
-         "Highest occupancy": "avg_occupancy",
+        {"Emptiest first": "avg_occupancy",
+         "Fullest first": "avg_occupancy",
          "Most spaces": "spaces"}[sort_pick],
-        ascending=(sort_pick == "Lowest occupancy"),
+        ascending=(sort_pick == "Emptiest first"),
     )
 
-    search = st.text_input("Find a blockface", placeholder="e.g. PIKE ST, 1ST AVE, BROADWAY")
+    search = st.text_input("Search by street name",
+                           placeholder="e.g. PIKE ST, 1ST AVE, BROADWAY")
     if search:
         view = view[view["blockfacename"].str.contains(search, case=False, na=False)]
 
     stat_row([
-        {"label": "Blockfaces shown", "value": f"{len(view):,}", "hero": True,
-         "delta": f"of {len(meters):,} citywide"},
-        {"label": "Spaces", "value": f"{int(view['spaces'].sum()):,}"},
-        {"label": "Mean occupancy",
-         "value": f"{view['avg_occupancy'].mean():.1%}" if len(view) else "—"},
+        {"label": "Blocks shown", "value": f"{len(view):,}", "hero": True,
+         "delta": f"of {len(meters):,} metered blocks citywide"},
+        {"label": "Spaces on these blocks", "value": f"{int(view['spaces'].sum()):,}"},
+        {"label": "Typically full",
+         "value": f"{view['avg_occupancy'].mean():.0%}" if len(view) else "—",
+         "delta": "target is 70–85%"},
     ])
 
     if view.empty:
-        st.info("No blockfaces match those filters.")
+        st.info("No blocks match those filters. Try widening them.")
         st.stop()
 
-    section("Blockfaces")
+    section("Every block, worst to best")
     table = view[[
         "blockfacename", "paidparkingarea", "avg_occupancy", "peak_hour_occupancy",
         "peak_hour", "spaces", "mean_adjustment", "primary_action",
@@ -672,23 +740,28 @@ elif page == "Meters":
     table["peak_hour"] = table["peak_hour"].map(fmt_hour)
     table["spaces"] = table["spaces"].round(0).astype(int)
     table["mean_adjustment"] = table["mean_adjustment"].map(adjustment_text)
-    table.columns = ["Blockface", "Area", "Avg occ.", "Peak occ.", "Peak hour",
-                     "Spaces", "Rate change", "Action"]
+    table["primary_action"] = table["primary_action"].map(
+        {"increase": "Charge more", "decrease": "Charge less",
+         "hold": "Leave as is"}).fillna("No data")
+    table.columns = ["Block", "Neighbourhood", "Typically full", "At its busiest",
+                     "Busiest hour", "Spaces", "Suggested price change", "What to do"]
 
     def colour_action(v):
-        return {"increase": f"background-color:#FBEEEE;color:{BAD}",
-                "decrease": f"background-color:#EAF1F6;color:{ACCENT}",
-                "hold": f"background-color:#EAF3EF;color:{GOOD}"}.get(v, f"color:{MUTED}")
+        return {"Charge more": f"background-color:#FBEEEE;color:{BAD}",
+                "Charge less": f"background-color:#EAF1F6;color:{ACCENT}",
+                "Leave as is": f"background-color:#EAF3EF;color:{GOOD}"}.get(v, f"color:{MUTED}")
 
-    st.dataframe(table.style.map(colour_action, subset=["Action"]),
+    st.dataframe(table.style.map(colour_action, subset=["What to do"]),
                  use_container_width=True, hide_index=True, height=460)
+    st.caption("\"Suggested price change\" is an adjustment to the price already "
+               "posted on that block — not a new total price.")
 
-    section("Hour-by-hour detail")
-    pick = st.selectbox("Blockface", view["blockfacename"].tolist())
+    section("Pick a block to see its day")
+    pick = st.selectbox("Block", view["blockfacename"].tolist())
     detail = recs[recs["blockfacename"] == pick].sort_values("hour_of_day")
 
     if detail.empty:
-        st.info("No hourly detail for this blockface.")
+        st.info("No hour-by-hour detail for this block.")
     else:
         figd = go.Figure()
         figd.add_trace(go.Bar(
@@ -702,9 +775,12 @@ elif page == "Meters":
         figd.add_hrect(y0=0.70, y1=0.85, fillcolor="rgba(17,97,73,0.10)", line_width=0,
                        annotation_text="target band")
         figd.update_yaxes(tickformat=".0%", range=[0, 1])
-        figd.update_layout(title=f"{pick} — occupancy and recommended rate change by hour",
+        figd.update_layout(title=f"How full {pick} gets through the day",
                            xaxis_title="Hour of day", height=380, **PLOTLY_THEME)
         st.plotly_chart(figd, use_container_width=True)
+        st.caption("Green bars sit in the city's 70–85% target. Blue bars are too "
+                   "empty, red too full. Numbers above a bar show the suggested "
+                   "hourly price change.")
 
         meta = view[view["blockfacename"] == pick].iloc[0]
         st.caption(
@@ -717,29 +793,30 @@ elif page == "Meters":
 # ── Page: Pricing ─────────────────────────────────────────────────────────────
 
 elif page == "Pricing":
-    st.title("Rate recommendations")
-    st.caption("Seattle Municipal Code 11.16.121 — Performance-Based Parking Pricing")
+    st.title("What should each block charge?")
+    st.caption("Suggested price changes under Seattle Municipal Code 11.16.121, "
+               "which lets the city adjust meter prices to keep blocks 70–85% full")
 
     callout("""
-        <b>Rate changes are relative.</b> Seattle publishes no per-meter posted
-        rate — the <code>paidparkingrate</code> field in the city's own occupancy
-        feed is empty on all 25.2M records. Rather than invent a baseline, every
-        figure below is an adjustment to apply to the rate currently posted at
-        that blockface. Legal bounds: <b>$0.50–$8.00/hr</b>. Rate changes require
-        City Council approval.
+        <b>These are changes, not final prices.</b> Seattle does not publish what
+        each meter currently charges, so the figures below say how much to add or
+        subtract from the price already posted on that block — for example
+        "40&cent; less per hour". By law the final price must stay between
+        <b>$0.50 and $8.00 an hour</b>, and any change needs City Council approval.
     """, kind="legal")
 
     counts = meters["primary_action"].value_counts()
     stat_row([
-        {"label": "Blockfaces to lower", "value": f"{int(counts.get('decrease', 0)):,}",
-         "delta": "under 70% occupancy", "delta_class": "kpi-warn", "hero": True},
-        {"label": "To raise", "value": f"{int(counts.get('increase', 0)):,}",
-         "delta": "over 85%", "delta_class": "kpi-bad"},
-        {"label": "Leave alone", "value": f"{int(counts.get('hold', 0)):,}",
-         "delta": "in target band", "delta_class": "kpi-good"},
+        {"label": "Blocks that should charge less",
+         "value": f"{int(counts.get('decrease', 0)):,}",
+         "delta": "too empty — under 70% full", "delta_class": "kpi-warn", "hero": True},
+        {"label": "Should charge more", "value": f"{int(counts.get('increase', 0)):,}",
+         "delta": "too crowded — over 85% full", "delta_class": "kpi-bad"},
+        {"label": "Priced about right", "value": f"{int(counts.get('hold', 0)):,}",
+         "delta": "inside the 70–85% target", "delta_class": "kpi-good"},
     ])
 
-    section("Average recommended change by area")
+    section("Suggested price change, by neighbourhood")
     by_area = (
         meters.groupby("paidparkingarea")
         .agg(mean_adjustment=("mean_adjustment", "mean"),
@@ -753,13 +830,14 @@ elif page == "Pricing":
         hovertemplate="%{y}<br>%{x:+.2f}/hr<extra></extra>",
     ))
     figp.add_vline(x=0, line_color=MUTED, line_width=1)
-    figp.update_layout(title="Recommended change vs posted rate ($/hr)",
-                       xaxis_title="Adjustment to posted rate ($/hr)",
+    figp.update_layout(title="Average change to add to the posted hourly price",
+                       xaxis_title="Change to hourly price ($)",
                        height=560, **PLOTLY_THEME)
     st.plotly_chart(figp, use_container_width=True)
+    st.caption("Bars to the left mean the price should come down; to the right, up.")
 
-    section("Recommendations by hour")
-    ha = st.selectbox("Area", ["All areas"] + sorted(recs["paidparkingarea"].unique()))
+    section("How the suggestion changes through the day")
+    ha = st.selectbox("Neighbourhood", ["All areas"] + sorted(recs["paidparkingarea"].unique()))
     hv = recs if ha == "All areas" else recs[recs["paidparkingarea"] == ha]
     hourly = hv.groupby("hour_of_day").agg(
         occupancy=("avg_occupancy", "mean"),
@@ -775,10 +853,10 @@ elif page == "Pricing":
                           opacity=0.55, yaxis="y2"))
     figh.add_hrect(y0=0.70, y1=0.85, fillcolor="rgba(17,97,73,0.10)", line_width=0)
     figh.update_layout(
-        title=f"Occupancy and recommended rate change — {ha}",
+        title=f"How full blocks get, and the suggested price change — {ha}",
         xaxis_title="Hour of day", height=400,
-        yaxis=dict(title="Occupancy", tickformat=".0%", range=[0, 1], gridcolor=LINE),
-        yaxis2=dict(title="Rate change ($/hr)", overlaying="y", side="right",
+        yaxis=dict(title="How full", tickformat=".0%", range=[0, 1], gridcolor=LINE),
+        yaxis2=dict(title="Price change ($/hr)", overlaying="y", side="right",
                     showgrid=False),
         **{k: v for k, v in PLOTLY_THEME.items() if k not in ("yaxis",)},
     )
@@ -788,8 +866,9 @@ elif page == "Pricing":
 # ── Page: Utilization ─────────────────────────────────────────────────────────
 
 elif page == "Utilization":
-    st.title("Utilization and revenue opportunity")
-    st.caption("Measured in space-hours — the quantity the city actually observes")
+    st.title("How full is Seattle's parking?")
+    st.caption("How much of the city's kerb space actually gets used, "
+               "and what it would take to hit the target")
 
     if util.empty:
         st.error("Run `python scripts/revenue_analyzer.py` first.")
@@ -800,65 +879,95 @@ elif page == "Utilization":
     unsold = util["unsold_space_hours"].sum()
     pct = occupied / target * 100 if target else 0
 
+    # Per-hour figures are what a person can actually picture. "43,994
+    # space-hours a day" means nothing; "about 3,700 spaces empty every hour"
+    # is immediately concrete.
+    PAID_HOURS = 12
+    empty_per_hour = unsold / len(util) / PAID_HOURS if len(util) else 0
+    used_per_hour = occupied / len(util) / PAID_HOURS if len(util) else 0
+
+    st.markdown(f"""
+    <div class="verdict">
+      <div class="verdict-lead">
+        On a typical day, about {empty_per_hour:,.0f} spaces sit empty every hour.
+      </div>
+      <div class="verdict-body">
+        During paid hours roughly <b>{used_per_hour:,.0f} spaces are occupied</b>
+        at any moment, against a city target that would put about
+        <b>{used_per_hour + empty_per_hour:,.0f}</b> in use. Every empty space is
+        kerb space the city is neither earning from nor giving to a driver who
+        wants it.
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
+
     c1, c2 = st.columns([1.7, 1])
     with c1:
         hero_with_sparkline(
-            "Unsold space-hours vs target",
-            f"{unsold/1e6:,.1f}M",
-            f"Running at {pct:.0f}% of the 80% target &middot; daily trend",
+            "Empty spaces, average hour",
+            f"{empty_per_hour:,.0f}",
+            f"vs the city's 70–85% target &middot; daily trend over time",
             util.sort_values("date")["occupied_space_hours"].tail(14).tolist(),
         )
     with c2:
         cc1, cc2 = st.columns(2)
         with cc1:
-            stat_cell("Occupied", f"{occupied/1e6:,.1f}M", "space-hours sold", "kpi-neutral")
+            stat_cell("Spaces in use", f"{used_per_hour:,.0f}",
+                      "in an average paid hour", "kpi-neutral")
         with cc2:
-            stat_cell("Utilization", f"{util['utilization_pct'].mean():.0f}%",
-                      "of capacity", "kpi-warn")
-        stat_cell("At 80% target", f"{target/1e6:,.1f}M", "space-hours", "kpi-neutral")
+            stat_cell("How full", f"{util['utilization_pct'].mean():.0f}%",
+                      "target is 70–85%", "kpi-warn")
+        stat_cell("Share of target reached", f"{pct:.0f}%",
+                  "of the parking the city aims to sell", "kpi-warn")
 
     callout("""
-        <b>Why there are no dollar totals.</b> Revenue equals rate x occupied
-        space-hours. Seattle publishes the occupancy but not the per-meter rate,
-        so any dollar figure here would be built on an invented number. Multiply
-        the space-hours by the real posted rate to get dollars — at $2.00/hr,
-        the unsold gap above is worth roughly
-        <b>$""" + f"{unsold*2/1e6:,.0f}M" + """</b> in foregone revenue.
+        <b>Why this page shows spaces, not dollars.</b> Money earned equals the
+        price per hour multiplied by how many spaces are taken. Seattle publishes
+        how full each block is, but <b>not what each meter charges</b> — so any
+        dollar total here would rest on a made-up price. Instead the page counts
+        parking itself. To convert to money, multiply by the real posted price:
+        at <b>$2.00 an hour</b>, the empty spaces above work out to roughly
+        <b>$""" + f"{empty_per_hour * PAID_HOURS * 2:,.0f}" + """ of unearned
+        revenue on an average day</b>.
     """)
 
-    section("Utilization over time")
+    section("How full the city has been over time")
     figu = go.Figure()
-    figu.add_trace(go.Scatter(x=util["date"], y=util["occupied_space_hours"],
-                              name="Occupied", fill="tozeroy",
+    figu.add_trace(go.Scatter(x=util["date"], y=util["occupied_space_hours"] / PAID_HOURS,
+                              name="Spaces in use", fill="tozeroy",
                               fillcolor="rgba(10,90,140,0.12)",
                               line=dict(color=ACCENT, width=2)))
-    figu.add_trace(go.Scatter(x=util["date"], y=util["target_space_hours"],
-                              name="80% target", line=dict(color=GOOD, width=2, dash="dot")))
-    figu.update_layout(title="Daily space-hours: occupied vs target",
-                       yaxis_title="Space-hours", height=400, **PLOTLY_THEME)
+    figu.add_trace(go.Scatter(x=util["date"], y=util["target_space_hours"] / PAID_HOURS,
+                              name="City target", line=dict(color=GOOD, width=2, dash="dot")))
+    figu.update_layout(title="Spaces occupied in an average hour, by day",
+                       yaxis_title="Spaces occupied", height=400, **PLOTLY_THEME)
     st.plotly_chart(figu, use_container_width=True)
+    st.caption("The gap between the two lines is parking the city hoped to sell "
+               "but did not.")
 
     if not area_hr.empty:
-        section("Where the gap is largest")
+        section("Which neighbourhoods have the most empty space")
         gap = (area_hr.groupby("paidparkingarea")
-               .agg(unsold=("unsold_space_hours", "sum"),
+               .agg(unsold=("unsold_space_hours", "mean"),
                     occupancy=("avg_occupancy", "mean"))
                .reset_index().sort_values("unsold", ascending=True).tail(15))
         figg = go.Figure(go.Bar(
             x=gap["unsold"], y=gap["paidparkingarea"], orientation="h",
             marker_color=WARN,
-            text=gap["occupancy"].map("{:.0%} occ".format), textposition="outside",
+            text=gap["occupancy"].map("{:.0%} full".format), textposition="outside",
+            hovertemplate="%{y}<br>%{x:.0f} spaces empty per hour<extra></extra>",
         ))
-        figg.update_layout(title="Unsold space-hours per average hour, by area",
-                           xaxis_title="Unsold space-hours", height=520, **PLOTLY_THEME)
+        figg.update_layout(title="Spaces sitting empty in an average hour",
+                           xaxis_title="Empty spaces", height=520, **PLOTLY_THEME)
         st.plotly_chart(figg, use_container_width=True)
 
 
 # ── Page: Infrastructure ──────────────────────────────────────────────────────
 
 elif page == "Infrastructure":
-    st.title("Infrastructure investment")
-    st.caption("Should Seattle build more paid parking capacity?")
+    st.title("Should the city build more parking?")
+    st.caption("What a new lot or garage would cost, and what it would have to "
+               "charge to pay for itself")
 
     if roi_df.empty:
         st.error("Run `python scripts/infrastructure_roi.py` first.")
@@ -868,25 +977,26 @@ elif page == "Infrastructure":
     cheapest = roi_df["breakeven_rate_per_hour"].min()
 
     stat_row([
-        {"label": "Viable projects", "value": f"{len(viable)}",
-         "delta": "of {} scenarios".format(len(roi_df)),
+        {"label": "Projects worth building", "value": f"{len(viable)}",
+         "delta": "out of {} options examined".format(len(roi_df)),
          "delta_class": "kpi-good" if len(viable) else "kpi-warn", "hero": True},
-        {"label": "Lowest breakeven rate", "value": f"${cheapest:.2f}/hr",
-         "delta": "to cover costs"},
-        {"label": "Areas assessed", "value": f"{roi_df['paidparkingarea'].nunique()}"},
+        {"label": "Cheapest to justify", "value": f"${cheapest:.2f}/hr",
+         "delta": "price it would need to charge"},
+        {"label": "Neighbourhoods checked",
+         "value": f"{roi_df['paidparkingarea'].nunique()}"},
     ])
 
     if viable.empty:
         callout("""
-            <b>No expansion is justified right now.</b> A project only makes sense
-            if existing capacity is already near the 80% target — and no area in
-            Seattle currently is. Adding spaces where blocks sit two-thirds empty
-            would lower utilization further and add debt service against
-            unsold capacity. The figures below show what each project
-            <em>would</em> require if demand recovered.
+            <b>Right now, building more parking would not pay off anywhere.</b>
+            New parking only makes sense where the existing kerb is already close
+            to full — and no Seattle neighbourhood is. Adding spaces next to
+            blocks that sit two-thirds empty would leave the city paying off a
+            loan on parking nobody uses. The table below shows what each project
+            <em>would</em> need to charge if demand recovered later.
         """)
 
-    section("Breakeven rate by project type")
+    section("What each type of project would have to charge")
     figr = px.box(
         roi_df, x="infra_type", y="breakeven_rate_per_hour", color="infra_type",
         labels={"infra_type": "", "breakeven_rate_per_hour": "Breakeven rate ($/hr)"},
@@ -894,12 +1004,14 @@ elif page == "Infrastructure":
     )
     figr.add_hline(y=8.00, line_dash="dash", line_color=BAD,
                    annotation_text="$8.00 legal cap (SMC 11.16.121)")
-    figr.update_layout(title="Hourly rate required to cover debt service and operations",
+    figr.update_layout(title="Hourly price needed just to cover loan and running costs",
                        showlegend=False, **PLOTLY_THEME)
     st.plotly_chart(figr, use_container_width=True)
+    st.caption("Anything above the red line cannot legally be charged, so those "
+               "projects could never pay for themselves.")
 
-    section("Scenario detail")
-    itype = st.selectbox("Project type", ["All"] + sorted(roi_df["infra_type"].unique()))
+    section("Every option, side by side")
+    itype = st.selectbox("Type of project", ["All"] + sorted(roi_df["infra_type"].unique()))
     rv = roi_df if itype == "All" else roi_df[roi_df["infra_type"] == itype]
     tbl = rv[["paidparkingarea", "infra_type", "n_new_spaces", "current_occupancy",
               "total_construction_cost", "total_annual_cost",
@@ -908,8 +1020,11 @@ elif page == "Infrastructure":
     tbl["total_construction_cost"] = tbl["total_construction_cost"].map("${:,.0f}".format)
     tbl["total_annual_cost"] = tbl["total_annual_cost"].map("${:,.0f}".format)
     tbl["breakeven_rate_per_hour"] = tbl["breakeven_rate_per_hour"].map("${:.2f}".format)
-    tbl.columns = ["Area", "Type", "New spaces", "Current occ.",
-                   "Build cost", "Annual cost", "Breakeven rate", "Viable"]
+    tbl["infra_type"] = tbl["infra_type"].str.replace("_", " ").str.title()
+    tbl["viable"] = tbl["viable"].map({True: "Yes", False: "No"})
+    tbl.columns = ["Neighbourhood", "Type", "New spaces", "How full it is now",
+                   "Cost to build", "Cost each year",
+                   "Price needed to break even", "Worth building?"]
     st.dataframe(tbl, use_container_width=True, hide_index=True, height=420)
     st.caption("Surface lot $5K/space · structured garage $45K/space · "
                "underground $90K/space. Municipal bond 4.5% over 20 years.")
@@ -920,9 +1035,9 @@ elif page == "Infrastructure":
 elif page == "Map":
     from folium.plugins import MarkerCluster
 
-    st.title("Blockface map")
-    st.caption("Every metered blockface in Seattle. Zoom in to separate clusters; "
-               "click a marker for detail.")
+    st.title("Map of every metered block")
+    st.caption("Colour shows how full a block usually is. Zoom in to split the "
+               "groups apart, then click any block for its details.")
 
     geo = meters.dropna(subset=["lat", "lon"])
     if geo.empty:
@@ -930,23 +1045,25 @@ elif page == "Map":
         st.stop()
 
     mc1, mc2 = st.columns([2, 2])
-    map_area = mc1.selectbox("Area", ["All areas"] + sorted(geo["paidparkingarea"].unique()))
-    map_action = mc2.selectbox("Show", ["All blockfaces", "Below target (under 70%)",
-                                        "On target (70–85%)", "Above target (over 85%)"])
+    map_area = mc1.selectbox("Neighbourhood",
+                             ["All areas"] + sorted(geo["paidparkingarea"].unique()))
+    map_action = mc2.selectbox("Show", ["All blocks", "Too empty (under 70% full)",
+                                        "Just right (70–85% full)",
+                                        "Too crowded (over 85% full)"])
 
     view = geo if map_area == "All areas" else geo[geo["paidparkingarea"] == map_area]
-    action_filter = {"Below target (under 70%)": "decrease",
-                     "On target (70–85%)": "hold",
-                     "Above target (over 85%)": "increase"}.get(map_action)
+    action_filter = {"Too empty (under 70% full)": "decrease",
+                     "Just right (70–85% full)": "hold",
+                     "Too crowded (over 85% full)": "increase"}.get(map_action)
     if action_filter:
         view = view[view["primary_action"] == action_filter]
 
-    st.caption(f"Showing {len(view):,} of {len(geo):,} blockfaces · "
-               "circles are individual blockfaces, numbered circles are groups — "
-               "zoom in to separate them")
+    st.caption(f"Showing {len(view):,} of {len(geo):,} blocks. A numbered circle "
+               "is a group of nearby blocks — zoom in and it splits apart into "
+               "individual ones.")
 
     if view.empty:
-        st.info("No blockfaces match those filters.")
+        st.info("No blocks match those filters. Try widening them.")
         st.stop()
 
     m = folium.Map(
@@ -1004,8 +1121,8 @@ elif page == "Map":
     for _, r in view.iterrows():
         occ = r["avg_occupancy"]
         colour = BAD if occ > 0.85 else (GOOD if occ >= 0.70 else ACCENT)
-        status = ("Above target" if occ > 0.85
-                  else ("On target" if occ >= 0.70 else "Below target"))
+        status = ("Too crowded" if occ > 0.85
+                  else ("Just right" if occ >= 0.70 else "Too empty"))
         popup = f"""
         <div style="font-family:'Source Sans 3',Arial,sans-serif;min-width:230px">
           <div style="font-size:13px;font-weight:700;color:{colour};
@@ -1015,13 +1132,13 @@ elif page == "Map":
           <table style="width:100%;font-size:12px;border-collapse:collapse">
             <tr><td style="color:{MUTED}">Area</td>
                 <td style="text-align:right;font-weight:700">{r['paidparkingarea']}</td></tr>
-            <tr><td style="color:{MUTED}">Avg occupancy</td>
+            <tr><td style="color:{MUTED}">Usually full</td>
                 <td style="text-align:right;font-weight:700;color:{colour}">{occ:.0%}</td></tr>
-            <tr><td style="color:{MUTED}">Peak hour</td>
+            <tr><td style="color:{MUTED}">Busiest hour</td>
                 <td style="text-align:right;font-weight:700">{fmt_hour(r['peak_hour'])}</td></tr>
             <tr><td style="color:{MUTED}">Spaces</td>
                 <td style="text-align:right;font-weight:700">{int(r['spaces'])}</td></tr>
-            <tr><td style="color:{MUTED}">Rate change</td>
+            <tr><td style="color:{MUTED}">Suggested change</td>
                 <td style="text-align:right;font-weight:700;color:{colour}">
                     {adjustment_text(r['mean_adjustment'])}</td></tr>
           </table>
@@ -1041,13 +1158,15 @@ elif page == "Map":
 
     st_folium(m, use_container_width=True, height=600, returned_objects=[])
 
-    section("Legend")
+    section("What the colours mean")
     l1, l2, l3 = st.columns(3)
     for col, (lbl, colour, desc) in zip(
         [l1, l2, l3],
-        [("Below target", ACCENT, "under 70% — lower the rate"),
-         ("On target", GOOD, "70–85% — no change"),
-         ("Above target", BAD, "over 85% — raise the rate")],
+        [("Too empty", ACCENT, "Under 70% full — consider charging less "
+                                "so more drivers use it"),
+         ("Just right", GOOD, "70–85% full — the city's goal, leave the price alone"),
+         ("Too crowded", BAD, "Over 85% full — consider charging more so a space "
+                              "is easier to find")],
     ):
         with col:
             st.markdown(
