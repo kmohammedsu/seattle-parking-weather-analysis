@@ -16,9 +16,10 @@ ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = ROOT / "data"
 REPORTS_DIR = ROOT / "reports"
 
-FEATURES_FILE = DATA_DIR / "features.csv"
+AREA_DAILY_FILE = DATA_DIR / "area_daily.csv"
+METERS_FILE = DATA_DIR / "meter_summary.csv"
 REVENUE_FILE = DATA_DIR / "revenue_summary.csv"
-PRICING_FILE = DATA_DIR / "pricing_recommendations.csv"
+PRICING_FILE = DATA_DIR / "meter_recommendations.csv"
 ROI_FILE = DATA_DIR / "infrastructure_roi.csv"
 PERF_FILE = ROOT / "models" / "performance" / "final_model_performance.csv"
 
@@ -44,83 +45,95 @@ def run():
 
     # ── Occupancy summary ────────────────────────────────────────────────────
     lines.append("## Occupancy")
-    if FEATURES_FILE.exists():
-        features = pd.read_csv(FEATURES_FILE, parse_dates=["hour"])
-        week_data = load_week(features)
+    if AREA_DAILY_FILE.exists():
+        area_day = pd.read_csv(AREA_DAILY_FILE, parse_dates=["date"])
+        cutoff = area_day["date"].max() - timedelta(days=7)
+        week = area_day[area_day["date"] >= cutoff]
 
-        if not week_data.empty:
-            avg_occ = week_data["avg_occupancy_rate"].mean()
-            peak_occ = week_data["avg_occupancy_rate"].max()
-            peak_hour_row = week_data.loc[week_data["avg_occupancy_rate"].idxmax()]
-            busiest_region = week_data.groupby("region")["avg_occupancy_rate"].mean().idxmax()
-            avg_by_region = week_data.groupby("region")["avg_occupancy_rate"].mean().reset_index()
+        if not week.empty:
+            avg_occ = week["avg_occupancy_rate"].mean()
+            by_area = (week.groupby("paidparkingarea")["avg_occupancy_rate"]
+                       .mean().reset_index()
+                       .sort_values("avg_occupancy_rate", ascending=False))
+            busiest = by_area.iloc[0]
 
             lines += [
                 f"- **Average occupancy:** {avg_occ:.1%}",
-                f"- **Peak occupancy:** {peak_occ:.1%} ({peak_hour_row['region']} at {peak_hour_row['hour'].strftime('%a %H:%M')})",
-                f"- **Busiest region:** {busiest_region}",
+                f"- **Busiest area:** {busiest['paidparkingarea']} "
+                f"({busiest['avg_occupancy_rate']:.1%})",
+                f"- **Areas tracked:** {by_area['paidparkingarea'].nunique()} "
+                f"(Seattle official paid parking areas)",
                 "",
-                "| Region | Avg Occupancy |",
-                "|--------|--------------|",
+                "| Area | Avg Occupancy | Status |",
+                "|------|--------------|--------|",
             ]
-            for _, r in avg_by_region.sort_values("avg_occupancy_rate", ascending=False).iterrows():
-                status = "🔴" if r["avg_occupancy_rate"] > 0.85 else ("🟡" if r["avg_occupancy_rate"] > 0.70 else "🟢")
-                lines.append(f"| {r['region']} | {status} {r['avg_occupancy_rate']:.1%} |")
+            for _, r in by_area.iterrows():
+                occ = r["avg_occupancy_rate"]
+                status = ("Above target" if occ > 0.85
+                          else ("On target" if occ >= 0.70 else "Below target"))
+                lines.append(f"| {r['paidparkingarea']} | {occ:.1%} | {status} |")
             lines.append("")
         else:
             lines.append("_No data for the past 7 days._\n")
     else:
-        lines.append("_features.csv not found._\n")
+        lines.append("_area_daily.csv not found._\n")
 
     # ── Revenue summary ──────────────────────────────────────────────────────
-    lines.append("## Revenue")
+    lines.append("## Utilization")
     if REVENUE_FILE.exists():
         revenue = pd.read_csv(REVENUE_FILE, parse_dates=["date"])
         week_rev = revenue[revenue["date"] >= revenue["date"].max() - pd.Timedelta(days=7)]
 
         if not week_rev.empty:
-            total_current = week_rev["current_revenue"].sum()
-            total_optimized = week_rev["optimized_revenue"].sum()
-            uplift = total_optimized - total_current
-            uplift_pct = uplift / max(total_current, 0.01) * 100
+            occupied = week_rev["occupied_space_hours"].sum()
+            target = week_rev["target_space_hours"].sum()
+            unsold = week_rev["unsold_space_hours"].sum()
+            util_pct = week_rev["utilization_pct"].mean()
 
             lines += [
-                f"- **Current revenue (7d):** ${total_current:,.0f}",
-                f"- **Optimized revenue (7d):** ${total_optimized:,.0f}",
-                f"- **Potential uplift:** ${uplift:+,.0f} ({uplift_pct:+.1f}%)",
+                f"- **Occupied (7d):** {occupied:,.0f} space-hours",
+                f"- **At 80% target:** {target:,.0f} space-hours",
+                f"- **Unsold vs target:** {unsold:,.0f} space-hours",
+                f"- **Utilization:** {util_pct:.1f}% of capacity",
+                "",
+                "_Revenue equals posted rate x occupied space-hours. Seattle publishes "
+                "no per-meter rate, so utilization is reported in space-hours; multiply "
+                f"by the real posted rate for dollars (e.g. at $2.00/hr the unsold gap "
+                f"is worth ~${unsold * 2:,.0f})._",
                 "",
             ]
         else:
-            lines.append("_No revenue data for the past 7 days._\n")
+            lines.append("_No utilization data for the past 7 days._\n")
     else:
         lines.append("_revenue_summary.csv not found._\n")
 
     # ── Pricing recommendations ──────────────────────────────────────────────
     lines.append("## Pricing Recommendations")
-    if PRICING_FILE.exists():
+    if PRICING_FILE.exists() and METERS_FILE.exists():
         pricing = pd.read_csv(PRICING_FILE)
-        increases = (pricing["action"] == "increase").sum()
-        decreases = (pricing["action"] == "decrease").sum()
-        holds = (pricing["action"] == "hold").sum()
+        meters = pd.read_csv(METERS_FILE)
+        counts = meters["primary_action"].value_counts()
 
         lines += [
-            f"- Rate increases recommended: **{increases}** zone-hours",
-            f"- Rate decreases recommended: **{decreases}** zone-hours",
-            f"- No change: **{holds}** zone-hours",
+            f"- Blockfaces to **lower**: **{int(counts.get('decrease', 0)):,}** (under 70% occupancy)",
+            f"- Blockfaces to **raise**: **{int(counts.get('increase', 0)):,}** (over 85%)",
+            f"- Blockfaces to **hold**: **{int(counts.get('hold', 0)):,}** (in target band)",
+            "",
+            "_Rate changes are adjustments to the currently posted rate. Seattle "
+            "publishes no per-meter rate data, so no absolute dollar rate is implied._",
             "",
         ]
 
-        # Top increases
-        top_inc = pricing[pricing["action"] == "increase"].nlargest(3, "revenue_delta")
+        top_inc = meters[meters["primary_action"] == "increase"].nlargest(3, "avg_occupancy")
         if not top_inc.empty:
-            lines.append("**Top increase opportunities:**")
+            lines.append("**Blockfaces most over target:**")
             for _, r in top_inc.iterrows():
-                lines.append(f"- {r['region']} at hour {int(r['hour_of_day'])}: "
-                              f"${r['current_rate']:.2f} → ${r['recommended_rate']:.2f} "
-                              f"(+${r['revenue_delta']:.2f}/hr)")
+                lines.append(f"- {r['blockfacename']} ({r['paidparkingarea']}): "
+                              f"{r['avg_occupancy']:.0%} occupancy, "
+                              f"recommend {r['mean_adjustment']:+.2f}/hr")
             lines.append("")
     else:
-        lines.append("_pricing_recommendations.csv not found._\n")
+        lines.append("_meter_recommendations.csv not found._\n")
 
     # ── Model performance ────────────────────────────────────────────────────
     lines.append("## Model Performance")
@@ -140,33 +153,25 @@ def run():
     lines.append("## Infrastructure Opportunities")
     if ROI_FILE.exists():
         roi = pd.read_csv(ROI_FILE)
-        viable = roi[roi["viable"]].nlargest(3, "roi_percent")
+        viable = roi[roi["viable"]]
         if not viable.empty:
             lines.append("Top viable investments this week:")
-            for _, r in viable.iterrows():
-                lines.append(f"- **{r['region']}** — {r['n_new_spaces']} space "
+            for _, r in viable.nsmallest(3, "breakeven_rate_per_hour").iterrows():
+                lines.append(f"- **{r['paidparkingarea']}** — {int(r['n_new_spaces'])} space "
                               f"{r['infra_type'].replace('_',' ')}: "
-                              f"ROI {r['roi_percent']:.1f}%, "
-                              f"payback {r['payback_years']:.1f} yrs")
+                              f"breakeven rate ${r['breakeven_rate_per_hour']:.2f}/hr")
         else:
-            lines.append("_No viable infrastructure investments identified._")
+            lines.append("No expansion is justified — no area currently reaches the "
+                         "80% utilization target, so added capacity would sit unused.")
         lines.append("")
+    else:
+        lines.append("_infrastructure_roi.csv not found._\n")
 
-    # ── Footer ───────────────────────────────────────────────────────────────
-    lines += [
-        "---",
-        "*Generated automatically by Seattle Parking Intelligence Platform. "
-        "Data: Seattle Open Data Portal + Open-Meteo + Ticketmaster. "
-        "Pricing authority: SMC 11.16.121.*",
-    ]
-
-    report_content = "\n".join(lines)
-    report_file.write_text(report_content)
-    print(f"Weekly report saved → {report_file}")
-
-    # Also write a "latest_report.md" symlink-style copy for easy access
-    (REPORTS_DIR / "latest_weekly_report.md").write_text(report_content)
-    return report_file
+    REPORTS_DIR.mkdir(exist_ok=True)
+    out = REPORTS_DIR / f"weekly_report_{now:%Y_W%W}.md"
+    out.write_text("\n".join(lines))
+    print(f"Weekly report saved -> {out}")
+    return out
 
 
 if __name__ == "__main__":

@@ -41,6 +41,7 @@ def main():
     results = {}
 
     # Step 1 — Fetch all data sources
+    results["registry"]       = run_step("Build meter registry",    "fetch_meter_registry")
     results["weather"]        = run_step("Fetch weather",           "weather_fetch")
     results["weather_process"]= run_step("Process weather data",    "weather_eda")
     results["parking"]        = run_step("Fetch live parking",      "fetch_parking")
@@ -56,8 +57,8 @@ def main():
     results["train"]          = run_step("Train model",             "train_model")
 
     # Step 4 — Revenue intelligence
-    results["pricing"]        = run_step("Pricing recommendations", "pricing_optimizer")
-    results["revenue"]        = run_step("Revenue analysis",        "revenue_analyzer")
+    results["pricing"]        = run_step("Per-meter pricing",       "pricing_optimizer")
+    results["revenue"]        = run_step("Utilization analysis",    "revenue_analyzer")
     results["roi"]            = run_step("Infrastructure ROI",      "infrastructure_roi")
 
     # Summary

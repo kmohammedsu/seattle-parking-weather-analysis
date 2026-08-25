@@ -1,10 +1,23 @@
 """
-Dynamic pricing recommendations under Seattle Municipal Code 11.16.121.
-Performance-Based Parking Pricing — city can adjust meter rates based on demand.
+Per-blockface pricing recommendations under Seattle Municipal Code 11.16.121.
+Performance-Based Parking Pricing — the city may adjust meter rates by demand.
 
-Target: 70–85% occupancy per block (standard SFMTA/Seattle benchmark).
-Below 70% → reduce rate to stimulate demand.
-Above 85% → increase rate to free up spaces.
+Target: 70–85% occupancy per blockface (standard SFMTA/Seattle benchmark).
+    below 70%  → reduce rate to attract parkers
+    above 85%  → raise rate to free up spaces
+    within     → hold
+
+RATE BASELINE
+    Seattle does not publish per-meter rates anywhere in its open data. The
+    `paidparkingrate` column exists in the occupancy feed but is populated on
+    0 of 25.2M rows, and no separate rate dataset exists. Rather than invent a
+    baseline, this script outputs a RELATIVE ADJUSTMENT — "+$0.50/hr vs the
+    currently posted rate" — which the city applies to whatever rate is
+    actually posted at that blockface. Nothing here is fabricated.
+
+Outputs
+    data/meter_recommendations.csv   blockface x hour recommendations (committed)
+    data/meter_summary.csv           one row per blockface, for the map (committed)
 """
 import json
 import pickle
@@ -16,29 +29,29 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = ROOT / "data"
 MODELS_DIR = ROOT / "models"
-OUTPUT_FILE = DATA_DIR / "pricing_recommendations.csv"
 
-FEATURES_FILE = DATA_DIR / "features.csv"
+FEATURES_FILE = DATA_DIR / "features.parquet"
+REGISTRY_FILE = DATA_DIR / "meter_registry.csv"
 MODEL_FILE = MODELS_DIR / "parking_demand_lgbm.pkl"
 FEATURE_LIST_FILE = MODELS_DIR / "feature_columns.json"
 
-# Seattle SMC 11.16.121 rate bounds (USD/hour)
+RECS_FILE = DATA_DIR / "meter_recommendations.csv"
+SUMMARY_FILE = DATA_DIR / "meter_summary.csv"
+
+# SMC 11.16.121 rate bounds (USD/hour) — constrain the *magnitude* of change
 RATE_MIN = 0.50
 RATE_MAX = 8.00
 RATE_STEP = 0.25
+MAX_ADJUSTMENT = 2.00   # largest single recommended move, in either direction
 
-# Occupancy targets
-TARGET_LOW = 0.70   # below this → reduce price
-TARGET_HIGH = 0.85  # above this → increase price
+TARGET_LOW = 0.70
+TARGET_HIGH = 0.85
 
-# Current base rates by area (approximate — city publishes these)
-BASE_RATES = {
-    "Downtown Seattle": 2.50,
-    "Capitol Hill": 2.00,
-    "South Lake Union": 2.00,
-    "Ballard": 1.50,
-    "International District": 1.50,
-}
+# Demand response: roughly -5% demand per +$0.25/hr (conservative, SFpark-style)
+ELASTICITY_PER_DOLLAR = -0.05 / 0.25
+
+# How recent a window to base recommendations on
+RECENT_DAYS = 90
 
 
 def load_model():
@@ -54,99 +67,179 @@ def load_feature_cols():
     return json.loads(FEATURE_LIST_FILE.read_text())
 
 
-def recommend_rate(occupancy: float, base_rate: float) -> float:
-    """Step rate up/down to push occupancy toward 70-85% target band."""
+def rate_adjustment(occupancy: float) -> float:
+    """Recommended change to the posted rate, in dollars/hour.
+
+    Returns a delta (not an absolute rate) because no per-meter posted rate
+    exists in Seattle's open data — see module docstring.
+    """
+    if np.isnan(occupancy):
+        return 0.0
+
     if occupancy < TARGET_LOW:
-        # How many steps below target?
-        gap = TARGET_LOW - occupancy
-        steps = max(1, int(gap / 0.05))
-        new_rate = base_rate - steps * RATE_STEP
+        steps = max(1, int((TARGET_LOW - occupancy) / 0.05))
+        delta = -steps * RATE_STEP
     elif occupancy > TARGET_HIGH:
-        gap = occupancy - TARGET_HIGH
-        steps = max(1, int(gap / 0.05))
-        new_rate = base_rate + steps * RATE_STEP
+        steps = max(1, int((occupancy - TARGET_HIGH) / 0.05))
+        delta = steps * RATE_STEP
     else:
-        return round(base_rate, 2)
+        return 0.0
 
-    return round(float(np.clip(new_rate, RATE_MIN, RATE_MAX)), 2)
+    return round(float(np.clip(delta, -MAX_ADJUSTMENT, MAX_ADJUSTMENT)), 2)
 
 
-def revenue_impact(current_rate: float, recommended_rate: float,
-                   spaces: float, hours: float = 1.0) -> dict:
-    """Estimate revenue delta under recommended rate vs current."""
-    # Assume 5% demand elasticity per $0.25 change (conservative)
-    rate_delta = recommended_rate - current_rate
-    elasticity = -0.05 / 0.25  # demand % change per $0.25
-    demand_change = elasticity * rate_delta  # as fraction
+def classify(occupancy: float) -> str:
+    if np.isnan(occupancy):
+        return "unknown"
+    if occupancy > TARGET_HIGH:
+        return "increase"
+    if occupancy < TARGET_LOW:
+        return "decrease"
+    return "hold"
 
-    current_revenue = current_rate * spaces * hours
-    new_revenue = recommended_rate * spaces * (1 + demand_change) * hours
+
+def demand_response(rate_delta: float, spaces: float, occupancy: float) -> dict:
+    """Projected occupancy and per-hour revenue change *per dollar of posted
+    rate*, since the posted rate itself is unknown.
+
+    `revenue_delta_per_posted_dollar` is the change in hourly revenue for each
+    $1.00 of currently posted rate — the city multiplies by the real rate.
+    """
+    occ_change = ELASTICITY_PER_DOLLAR * rate_delta
+    projected_occ = float(np.clip(occupancy * (1 + occ_change), 0, 1))
+
+    occupied_now = occupancy * spaces
+    occupied_new = projected_occ * spaces
+
+    # Revenue is rate x occupied spaces. Expressed per $1 of posted rate:
+    #   now = 1.00 * occupied_now ; after = (1.00 + delta) * occupied_new
+    revenue_now = occupied_now
+    revenue_after = (1.0 + rate_delta) * occupied_new
+
     return {
-        "current_revenue": round(current_revenue, 2),
-        "projected_revenue": round(new_revenue, 2),
-        "revenue_delta": round(new_revenue - current_revenue, 2),
-        "revenue_delta_pct": round((new_revenue - current_revenue) / max(current_revenue, 0.01) * 100, 1),
+        "projected_occupancy": round(projected_occ, 3),
+        "occupancy_change_pts": round((projected_occ - occupancy) * 100, 1),
+        "revenue_delta_per_posted_dollar": round(revenue_after - revenue_now, 3),
     }
+
+
+def load_recent() -> pd.DataFrame:
+    df = pd.read_parquet(
+        FEATURES_FILE,
+        columns=["hour", "blockfacename", "paidparkingarea", "paidparkingsubarea",
+                 "avg_occupancy_rate", "total_spaces", "hour_of_day",
+                 "lat", "lon", "time_limit", "n_meters"],
+    )
+    cutoff = df["hour"].max() - pd.Timedelta(days=RECENT_DAYS)
+    recent = df[df["hour"] >= cutoff]
+    print(f"  Recent window: {cutoff.date()} → {df['hour'].max().date()} "
+          f"({len(recent):,} rows)")
+    return recent
+
+
+def build_recommendations(recent: pd.DataFrame, registry: pd.DataFrame) -> pd.DataFrame:
+    """One recommendation per blockface x hour-of-day.
+
+    Capacity comes from the registry, not the occupancy feed. The historical
+    feed aggregated `avg(parkingspacecount)` across each blockface's meter
+    keys rather than summing them, understating true capacity by ~38%. The
+    occupancy *rate* is unaffected (it is an average over the same keys), but
+    any absolute space count must come from the registry.
+    """
+    grouped = (
+        recent.groupby(["blockfacename", "paidparkingarea", "hour_of_day"], observed=True)
+        .agg(
+            avg_occupancy=("avg_occupancy_rate", "mean"),
+            spaces_observed=("total_spaces", "mean"),
+            n_observations=("avg_occupancy_rate", "size"),
+        )
+        .reset_index()
+        .merge(registry[["blockfacename", "spaces"]], on="blockfacename", how="left")
+    )
+    grouped["spaces"] = grouped["spaces"].fillna(grouped["spaces_observed"])
+
+    grouped["rate_adjustment"] = grouped["avg_occupancy"].apply(rate_adjustment)
+    grouped["action"] = grouped["avg_occupancy"].apply(classify)
+
+    response = grouped.apply(
+        lambda r: demand_response(r["rate_adjustment"], r["spaces"], r["avg_occupancy"]),
+        axis=1, result_type="expand",
+    )
+    grouped = pd.concat([grouped, response], axis=1)
+
+    grouped["avg_occupancy"] = grouped["avg_occupancy"].round(3)
+    grouped["spaces"] = grouped["spaces"].round(1)
+    return grouped.sort_values(["paidparkingarea", "blockfacename", "hour_of_day"])
+
+
+def build_summary(recs: pd.DataFrame, registry: pd.DataFrame) -> pd.DataFrame:
+    """One row per blockface — powers the map and the meter drill-down."""
+    summary = (
+        recs.groupby(["blockfacename", "paidparkingarea"], observed=True)
+        .agg(
+            avg_occupancy=("avg_occupancy", "mean"),
+            peak_hour_occupancy=("avg_occupancy", "max"),
+            spaces=("spaces", "mean"),
+            hours_over_target=("action", lambda s: int((s == "increase").sum())),
+            hours_under_target=("action", lambda s: int((s == "decrease").sum())),
+            hours_on_target=("action", lambda s: int((s == "hold").sum())),
+            mean_adjustment=("rate_adjustment", "mean"),
+            max_adjustment=("rate_adjustment", "max"),
+            min_adjustment=("rate_adjustment", "min"),
+        )
+        .reset_index()
+    )
+
+    # Peak hour per blockface
+    peak = recs.loc[recs.groupby("blockfacename", observed=True)["avg_occupancy"].idxmax()]
+    summary = summary.merge(
+        peak[["blockfacename", "hour_of_day"]].rename(columns={"hour_of_day": "peak_hour"}),
+        on="blockfacename", how="left",
+    )
+
+    summary["primary_action"] = summary["avg_occupancy"].apply(classify)
+    summary = summary.merge(
+        registry[["blockfacename", "paidparkingsubarea", "lat", "lon",
+                  "time_limit", "n_meters"]],
+        on="blockfacename", how="left",
+    )
+
+    for c in ["avg_occupancy", "peak_hour_occupancy", "mean_adjustment"]:
+        summary[c] = summary[c].round(3)
+    summary["spaces"] = summary["spaces"].round(1)
+    return summary.sort_values(["paidparkingarea", "blockfacename"])
 
 
 def run():
     if not FEATURES_FILE.exists():
-        print("features.csv not found — run aggregate_features.py first.")
+        print(f"{FEATURES_FILE.name} not found — run aggregate_features.py first.")
+        return
+    if not REGISTRY_FILE.exists():
+        print("meter_registry.csv not found — run fetch_meter_registry.py first.")
         return
 
-    features = pd.read_csv(FEATURES_FILE, parse_dates=["hour"])
-
-    # Work with the most recent 30 days
-    cutoff = features["hour"].max() - pd.Timedelta(days=30)
-    recent = features[features["hour"] >= cutoff].copy()
-
+    registry = pd.read_csv(REGISTRY_FILE)
+    recent = load_recent()
     if recent.empty:
-        print("No recent features to generate recommendations from.")
+        print("No recent data to price.")
         return
 
-    # Load model for predictions
-    try:
-        model = load_model()
-        feature_cols = load_feature_cols()
-        available = [c for c in feature_cols if c in recent.columns]
-        for col in available:
-            if recent[col].dtype == bool:
-                recent[col] = recent[col].astype(int)
-        recent["predicted_occupancy"] = model.predict(recent[available].fillna(0))
-    except FileNotFoundError as e:
-        print(f"  Warning: {e}")
-        print("  Using actual occupancy rates for recommendations (no model predictions).")
-        recent["predicted_occupancy"] = recent["avg_occupancy_rate"]
+    recs = build_recommendations(recent, registry)
+    summary = build_summary(recs, registry)
 
-    # Generate recommendations per region × hour bucket
-    recs = []
-    for (region, hour_of_day), grp in recent.groupby(["region", "hour_of_day"]):
-        avg_predicted = grp["predicted_occupancy"].mean()
-        avg_spaces = grp["total_spaces"].mean()
-        base_rate = BASE_RATES.get(region, 2.00)
-        rec_rate = recommend_rate(avg_predicted, base_rate)
-        impact = revenue_impact(base_rate, rec_rate, avg_spaces)
+    recs.to_csv(RECS_FILE, index=False)
+    summary.to_csv(SUMMARY_FILE, index=False)
 
-        recs.append({
-            "region": region,
-            "hour_of_day": hour_of_day,
-            "avg_predicted_occupancy": round(avg_predicted, 3),
-            "avg_spaces": round(avg_spaces, 0),
-            "current_rate": base_rate,
-            "recommended_rate": rec_rate,
-            "rate_change": round(rec_rate - base_rate, 2),
-            "action": "increase" if rec_rate > base_rate else ("decrease" if rec_rate < base_rate else "hold"),
-            **impact,
-        })
-
-    df = pd.DataFrame(recs).sort_values(["region", "hour_of_day"])
-    df.to_csv(OUTPUT_FILE, index=False)
-
-    total_delta = df["revenue_delta"].sum()
-    print(f"Generated {len(df)} pricing recommendations")
-    print(f"Estimated hourly revenue delta (all regions): ${total_delta:+.2f}")
-    print(f"Saved → {OUTPUT_FILE}")
-    return df
+    counts = summary["primary_action"].value_counts()
+    print(f"\nRecommendations: {len(recs):,} blockface-hours across "
+          f"{summary['blockfacename'].nunique():,} blockfaces")
+    print(f"  Raise rate : {counts.get('increase', 0):>4} blockfaces (over 85% occupancy)")
+    print(f"  Lower rate : {counts.get('decrease', 0):>4} blockfaces (under 70%)")
+    print(f"  Hold       : {counts.get('hold', 0):>4} blockfaces (in 70-85% target band)")
+    print(f"\n  Rate changes are RELATIVE to each blockface's posted rate")
+    print(f"  (Seattle publishes no per-meter rate data — see module docstring)")
+    print(f"\nSaved → {RECS_FILE.name}, {SUMMARY_FILE.name}")
+    return recs
 
 
 if __name__ == "__main__":

@@ -46,11 +46,14 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add data/features.csv data/pricing_recommendations.csv \
-                  data/revenue_summary.csv data/revenue_by_region_hour.csv \
+          git add data/meter_registry.csv data/meter_summary.csv \
+                  data/meter_recommendations.csv \
+                  data/area_daily.csv data/area_hour_profile.csv \
+                  data/revenue_summary.csv data/revenue_by_area_hour.csv \
+                  data/infrastructure_roi.csv \
                   last_run.json logs/pipeline.log \
                   models/parking_demand_lgbm.pkl \
                   models/performance/final_model_performance.csv \
-                  models/feature_columns.json || true
+                  models/feature_columns.json models/feature_categories.json || true
           git diff --cached --quiet || git commit -m "chore: daily pipeline update $(date -u +%Y-%m-%d)"
           git push

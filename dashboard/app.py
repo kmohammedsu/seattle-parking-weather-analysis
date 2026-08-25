@@ -43,21 +43,24 @@ GOOD         = "#116149"
 WARN         = "#8A4B0C"
 BAD          = "#9C2626"
 
-REGION_COLORS = {
-    "Downtown Seattle":       "#0A5A8C",
-    "South Lake Union":       "#116149",
-    "Capitol Hill":           "#9C2626",
-    "International District": "#5B3A8E",
-    "Ballard":                "#8A4B0C",
-}
+# Seattle has 23 official paid parking areas — too many for hand-picked
+# colours, so assign deterministically from an accessible categorical ramp.
+AREA_PALETTE = [
+    "#0A5A8C", "#116149", "#9C2626", "#5B3A8E", "#8A4B0C",
+    "#0E7A8C", "#7A1F5C", "#2F5F1F", "#8C3D0A", "#3D3D8C",
+]
+
+
+def area_color(area: str) -> str:
+    return AREA_PALETTE[hash(str(area)) % len(AREA_PALETTE)]
 
 NAV_ITEMS = [
     ("Overview", "overview"),
-    ("Revenue", "revenue"),
-    ("Forecast", "forecast"),
+    ("Meters", "meters"),
     ("Pricing", "pricing"),
+    ("Utilization", "utilization"),
     ("Infrastructure", "infrastructure"),
-    ("Geo Map", "map"),
+    ("Map", "map"),
 ]
 
 if "page" not in st.session_state:
@@ -377,52 +380,54 @@ PLOTLY_THEME = dict(
     yaxis=dict(gridcolor=LINE, zeroline=False, linecolor=LINE),
     legend=dict(bgcolor="rgba(0,0,0,0)", bordercolor=LINE),
     margin=dict(l=40, r=20, t=50, b=40),
-    colorway=[ACCENT, GOOD, WARN, "#5B3A8E", BAD, "#0E7A8C"],
+    colorway=AREA_PALETTE,
 )
 
 
+
 # ── Loaders ───────────────────────────────────────────────────────────────────
+# Every artifact here is small and committed. The full meter-level feature table
+# (15M rows) is deliberately NOT loaded — it is a training intermediate, far too
+# large for Streamlit Cloud.
 
-@st.cache_data(ttl=3600)
-def load_features():
-    f = DATA_DIR / "features.csv"
-    return pd.read_csv(f, parse_dates=["hour"]) if f.exists() else pd.DataFrame()
-
-
-@st.cache_data(ttl=3600)
-def load_revenue_summary():
-    f = DATA_DIR / "revenue_summary.csv"
-    return pd.read_csv(f, parse_dates=["date"]) if f.exists() else pd.DataFrame()
+def _read(name, **kw):
+    f = DATA_DIR / name
+    return pd.read_csv(f, **kw) if f.exists() else pd.DataFrame()
 
 
 @st.cache_data(ttl=3600)
-def load_revenue_detail():
-    f = DATA_DIR / "revenue_by_region_hour.csv"
-    return pd.read_csv(f) if f.exists() else pd.DataFrame()
+def load_meters():
+    return _read("meter_summary.csv")
 
 
 @st.cache_data(ttl=3600)
-def load_pricing():
-    f = DATA_DIR / "pricing_recommendations.csv"
-    return pd.read_csv(f) if f.exists() else pd.DataFrame()
+def load_recommendations():
+    return _read("meter_recommendations.csv")
+
+
+@st.cache_data(ttl=3600)
+def load_area_daily():
+    return _read("area_daily.csv", parse_dates=["date"])
+
+
+@st.cache_data(ttl=3600)
+def load_area_profile():
+    return _read("area_hour_profile.csv")
+
+
+@st.cache_data(ttl=3600)
+def load_utilization():
+    return _read("revenue_summary.csv", parse_dates=["date"])
+
+
+@st.cache_data(ttl=3600)
+def load_area_hour():
+    return _read("revenue_by_area_hour.csv")
 
 
 @st.cache_data(ttl=3600)
 def load_roi():
-    f = DATA_DIR / "infrastructure_roi.csv"
-    return pd.read_csv(f) if f.exists() else pd.DataFrame()
-
-
-@st.cache_resource
-def load_model():
-    model_file = MODELS_DIR / "parking_demand_lgbm.pkl"
-    feat_file = MODELS_DIR / "feature_columns.json"
-    if not model_file.exists():
-        return None, None
-    with open(model_file, "rb") as f:
-        model = pickle.load(f)
-    feat_cols = json.loads(feat_file.read_text()) if feat_file.exists() else []
-    return model, feat_cols
+    return _read("infrastructure_roi.csv")
 
 
 @st.cache_data(ttl=3600)
@@ -431,26 +436,42 @@ def load_perf():
     return pd.read_csv(f).iloc[0].to_dict() if f.exists() else {}
 
 
-# ── Load data ─────────────────────────────────────────────────────────────────
+meters   = load_meters()
+recs     = load_recommendations()
+area_day = load_area_daily()
+profile  = load_area_profile()
+util     = load_utilization()
+area_hr  = load_area_hour()
+roi_df   = load_roi()
+perf     = load_perf()
 
-features = load_features()
-pricing = load_pricing()
-rev_summary = load_revenue_summary()
-rev_detail = load_revenue_detail()
-roi_df = load_roi()
-model, feat_cols = load_model()
-perf = load_perf()
+ACTION_LABEL = {
+    "increase": ("RAISE RATE", "red", "up"),
+    "decrease": ("LOWER RATE", "blue", "down"),
+    "hold":     ("ON TARGET", "green", "flat"),
+    "unknown":  ("NO DATA", "yellow", "dot"),
+}
+
+
+def fmt_hour(h):
+    h = int(h)
+    return f"{h % 12 or 12}{'am' if h < 12 else 'pm'}"
+
+
+def adjustment_text(v):
+    if pd.isna(v) or v == 0:
+        return "no change"
+    return f"{v:+.2f}/hr"
 
 
 # ── Top command bar ───────────────────────────────────────────────────────────
 
 meta_html = ""
-if not features.empty:
-    last_updated = features["hour"].max().strftime("%b %d, %Y")
-    n_days = features["hour"].dt.date.nunique()
-    avg_occ_meta = features["avg_occupancy_rate"].mean()
-    meta_html += f'<span class="meta-pill">Data through <b>{last_updated}</b></span>'
-    meta_html += f'<span class="meta-pill">{n_days} days tracked</span>'
+if not area_day.empty:
+    meta_html += f'<span class="meta-pill">Data through <b>{area_day["date"].max():%b %d, %Y}</b></span>'
+if not meters.empty:
+    meta_html += f'<span class="meta-pill"><b>{len(meters):,}</b> blockfaces</span>'
+    meta_html += f'<span class="meta-pill"><b>{meters["paidparkingarea"].nunique()}</b> official areas</span>'
 if perf:
     meta_html += f'<span class="meta-pill">Model R&sup2; <b>{perf.get("r2", 0):.3f}</b></span>'
 
@@ -467,15 +488,14 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-nav_widths = [1.0, 0.9, 1.0, 0.9, 1.5, 1.0, 3.5]
-nav_cols = st.columns(nav_widths)
+nav_cols = st.columns([1.0, 0.9, 0.9, 1.1, 1.4, 0.8, 3.4])
 for (label, slug), col in zip(NAV_ITEMS, nav_cols[:-1]):
     with col:
         with st.container(key=f"navitem_{slug}"):
             if st.button(label, key=f"navbtn_{slug}", use_container_width=False):
                 st.session_state.page = label
 
-active_slug = dict((l, s) for l, s in NAV_ITEMS)[st.session_state.page]
+active_slug = dict(NAV_ITEMS)[st.session_state.page]
 st.markdown(f"""
 <style>
 div[class*="st-key-navitem_{active_slug}"] button {{
@@ -488,803 +508,503 @@ div[class*="st-key-navitem_{active_slug}"] button {{
 
 page = st.session_state.page
 
+if meters.empty:
+    st.error("No meter data found. Run the pipeline: `python run_pipeline.py`")
+    st.stop()
+
 
 # ── Page: Overview ────────────────────────────────────────────────────────────
 
 if page == "Overview":
-    st.title("Live overview")
+    st.title("Citywide overview")
+    st.caption("Every paid blockface in Seattle, graded against the SMC 11.16.121 "
+               "target band of 70–85% occupancy")
 
-    if features.empty:
-        st.error("No feature data available. Run the pipeline first.")
-        st.stop()
+    citywide_occ = float((meters["avg_occupancy"] * meters["spaces"]).sum() / meters["spaces"].sum())
+    counts = meters["primary_action"].value_counts()
+    on_target = int(counts.get("hold", 0))
+    total_spaces = int(meters["spaces"].sum())
 
-    recent = features[features["hour"] >= features["hour"].max() - pd.Timedelta(hours=48)]
-    avg_occ = features["avg_occupancy_rate"].mean()
-    recent_occ = recent["avg_occupancy_rate"].mean() if not recent.empty else 0
-    n_regions = features["region"].nunique()
-    n_days = features["hour"].dt.date.nunique()
-
-    daily_trend = (
-        features.groupby(features["hour"].dt.date)["avg_occupancy_rate"]
-        .mean()
-        .tail(14)
+    trend = (
+        area_day.groupby("date")["avg_occupancy_rate"].mean().tail(14).tolist()
+        if not area_day.empty else [citywide_occ] * 14
     )
-
-    occ_cls = "kpi-good" if 0.70 <= avg_occ <= 0.85 else ("kpi-bad" if avg_occ > 0.85 else "kpi-warn")
-    r_cls = "kpi-good" if 0.70 <= recent_occ <= 0.85 else ("kpi-bad" if recent_occ > 0.85 else "kpi-warn")
-    ic = "up" if avg_occ > 0.85 else ("flat" if avg_occ >= 0.70 else "down")
-    delta_color = BAD if avg_occ > 0.85 else (GOOD if avg_occ >= 0.70 else WARN)
-    delta_text = "Above target" if avg_occ > 0.85 else ("In target band" if avg_occ >= 0.70 else "Below target")
 
     c1, c2 = st.columns([1.7, 1])
     with c1:
         hero_with_sparkline(
-            "System occupancy",
-            f"{avg_occ:.1%}",
-            f'{icon(ic, "#CBD5E1")} {delta_text} &middot; 14-day trend',
-            daily_trend.tolist(),
+            "Citywide occupancy",
+            f"{citywide_occ:.1%}",
+            f'{icon("down", "#CBD5E1")} Below the 70% target floor &middot; 14-day trend',
+            trend,
         )
     with c2:
         cc1, cc2 = st.columns(2)
         with cc1:
-            stat_cell("Last 48h", f"{recent_occ:.1%}", "", r_cls)
+            stat_cell("On target", f"{on_target}", f"of {len(meters):,} blockfaces",
+                      "kpi-good" if on_target else "kpi-warn")
         with cc2:
-            stat_cell("Regions", str(n_regions), "Active zones", "kpi-neutral")
-        stat_cell("Days of data", f"{n_days:,}", "In feature store", "kpi-neutral")
+            stat_cell("Paid spaces", f"{total_spaces:,}", "citywide", "kpi-neutral")
+        stat_cell("Below target", f"{int(counts.get('decrease', 0)):,}",
+                  "blockfaces under 70% occupancy", "kpi-warn")
 
-    st.markdown("<br>", unsafe_allow_html=True)
+    callout("""
+        <b>How to read this.</b> Seattle's paid parking is running well below the
+        70–85% band the municipal code targets. Under SMC 11.16.121 that points
+        toward <b>lower</b> rates to attract parkers, not higher ones — raising
+        prices on half-empty blocks would push utilization further down.
+        Rate changes below are expressed as an adjustment to whatever rate is
+        currently posted, because Seattle publishes no per-meter rate data.
+    """)
 
-    section("Region status")
-    region_occ = (
-        features.groupby("region")["avg_occupancy_rate"]
-        .mean()
-        .sort_values(ascending=False)
+    section("Areas needing attention")
+    area_stats = (
+        meters.groupby("paidparkingarea")
+        .apply(lambda g: pd.Series({
+            "occupancy": (g["avg_occupancy"] * g["spaces"]).sum() / g["spaces"].sum(),
+            "blockfaces": len(g),
+            "spaces": g["spaces"].sum(),
+            "on_target": int((g["primary_action"] == "hold").sum()),
+        }), include_groups=False)
         .reset_index()
+        .sort_values("occupancy", ascending=False)
     )
 
-    cols = st.columns(len(region_occ))
-    for i, (_, row) in enumerate(region_occ.iterrows()):
-        rate = row["avg_occupancy_rate"]
-        rc = REGION_COLORS.get(row["region"], ACCENT)
-        status = ("HIGH DEMAND", "red", "up") if rate > 0.85 else (("ON TARGET", "green", "flat") if rate >= 0.70 else ("UNDERUTILIZED", "blue", "down"))
-        action = "Raise rates" if rate > 0.85 else ("Hold" if rate >= 0.70 else "Analyze demand")
+    top = area_stats.head(5)
+    cols = st.columns(len(top))
+    for i, (_, row) in enumerate(top.iterrows()):
+        rate = row["occupancy"]
+        label, colour, ic = ACTION_LABEL[
+            "increase" if rate > 0.85 else ("hold" if rate >= 0.70 else "decrease")
+        ]
         with cols[i]:
             st.markdown(f"""
-            <div class="region-cell" style="--rc:{rc}">
-                <div class="region-name">{row['region']}</div>
+            <div class="region-cell" style="--rc:{area_color(row['paidparkingarea'])}">
+                <div class="region-name">{row['paidparkingarea']}</div>
                 <div class="region-value">{rate:.0%}</div>
-                <div style="margin:6px 0">{badge(status[0], status[1], status[2])}</div>
-                <div class="region-sub">{action} &rarr;</div>
+                <div style="margin:6px 0">{badge(label, colour, ic)}</div>
+                <div class="region-sub">{int(row['blockfaces'])} blockfaces &middot;
+                    {int(row['spaces'])} spaces</div>
             </div>
             """, unsafe_allow_html=True)
 
-    section("Occupancy patterns")
+    section("Occupancy by area")
+    fig = px.bar(
+        area_stats.sort_values("occupancy"),
+        x="occupancy", y="paidparkingarea", orientation="h",
+        labels={"occupancy": "Average occupancy", "paidparkingarea": ""},
+        height=560, text=area_stats.sort_values("occupancy")["occupancy"].map("{:.0%}".format),
+    )
+    fig.update_traces(marker_color=ACCENT, textposition="outside")
+    fig.add_vrect(x0=0.70, x1=0.85, fillcolor="rgba(17,97,73,0.10)", line_width=0,
+                  annotation_text="70–85% target band", annotation_position="top")
+    fig.update_xaxes(tickformat=".0%", range=[0, 1])
+    fig.update_layout(title="Every official paid parking area vs the target band",
+                      **PLOTLY_THEME)
+    st.plotly_chart(fig, use_container_width=True)
 
-    col_left, col_right = st.columns(2)
-
-    with col_left:
-        DAY_NAMES = {0: "Mon", 1: "Tue", 2: "Wed", 3: "Thu", 4: "Fri", 5: "Sat", 6: "Sun"}
-        pivot = (
-            features
-            .groupby(["hour_of_day", "day_of_week"])["avg_occupancy_rate"]
-            .mean()
-            .unstack(fill_value=0)
-            .reindex(columns=range(7), fill_value=0)
+    if not profile.empty:
+        section("When demand actually happens")
+        DAYS = {0: "Mon", 1: "Tue", 2: "Wed", 3: "Thu", 4: "Fri", 5: "Sat", 6: "Sun"}
+        piv = (profile.groupby(["hour_of_day", "day_of_week"])["avg_occupancy_rate"]
+               .mean().unstack(fill_value=0))
+        piv.columns = [DAYS.get(c, c) for c in piv.columns]
+        fig2 = px.imshow(
+            piv, labels={"x": "Day", "y": "Hour", "color": "Occupancy"},
+            color_continuous_scale=[[0, "#F1F5F9"], [1, ACCENT]], zmin=0, zmax=1,
+            title="Citywide occupancy — hour x day", height=420,
         )
-        pivot.columns = [DAY_NAMES[c] for c in pivot.columns]
-        fig = px.imshow(
-            pivot,
-            labels={"x": "Day", "y": "Hour", "color": "Occupancy"},
-            color_continuous_scale=[[0, "#F1F5F9"], [1, ACCENT]],
-            zmin=0, zmax=1,
-            title="Occupancy heatmap — hour × day",
-            height=380,
-        )
-        fig.update_layout(**PLOTLY_THEME)
-        fig.update_coloraxes(colorbar=dict(tickformat=".0%", len=0.8))
-        st.plotly_chart(fig, use_container_width=True)
-
-    with col_right:
-        daily_avg = (
-            features.groupby(features["hour"].dt.date)["avg_occupancy_rate"]
-            .mean()
-            .reset_index()
-            .rename(columns={"hour": "date"})
-            .tail(30)
-        )
-        fig2 = go.Figure()
-        fig2.add_trace(go.Scatter(
-            x=daily_avg["date"], y=daily_avg["avg_occupancy_rate"],
-            fill="tozeroy", fillcolor="rgba(10,90,140,0.08)",
-            line=dict(color=ACCENT, width=2),
-            name="Occupancy",
-        ))
-        fig2.add_hline(y=0.85, line_dash="dash", line_color=BAD,
-                       annotation_text="85% upper", annotation_position="top right")
-        fig2.add_hline(y=0.70, line_dash="dash", line_color=WARN,
-                       annotation_text="70% lower", annotation_position="bottom right")
-        fig2.update_layout(
-            title="Daily average occupancy — last 30 days",
-            height=380,
-            **{**PLOTLY_THEME, "yaxis": dict(tickformat=".0%", range=[0, 1], gridcolor=LINE)},
-        )
+        fig2.update_layout(**PLOTLY_THEME)
+        fig2.update_coloraxes(colorbar=dict(tickformat=".0%", len=0.8))
         st.plotly_chart(fig2, use_container_width=True)
 
-    section("Peak hours by region")
-    hourly_region = (
-        features.groupby(["region", "hour_of_day"])["avg_occupancy_rate"]
-        .mean()
-        .reset_index()
-    )
-    fig3 = px.line(
-        hourly_region, x="hour_of_day", y="avg_occupancy_rate", color="region",
-        title="Average occupancy by hour of day",
-        labels={"hour_of_day": "Hour", "avg_occupancy_rate": "Occupancy", "region": "Region"},
-        height=350,
-        color_discrete_map=REGION_COLORS,
-    )
-    fig3.add_hrect(y0=0.70, y1=0.85, fillcolor="rgba(17,97,73,0.06)",
-                   line_width=0, annotation_text="Target band")
-    fig3.update_yaxes(tickformat=".0%", range=[0, 1])
-    fig3.update_layout(**PLOTLY_THEME)
-    st.plotly_chart(fig3, use_container_width=True)
 
+# ── Page: Meters (per-blockface drill-down) ──────────────────────────────────
 
-# ── Page: Revenue ─────────────────────────────────────────────────────────────
+elif page == "Meters":
+    st.title("Blockface detail")
+    st.caption("Every metered blockface, its measured occupancy, and the rate "
+               "adjustment SMC 11.16.121 implies")
 
-elif page == "Revenue":
-    st.title("Revenue intelligence")
-    st.caption("Current earnings vs full potential at 80% occupancy target with optimal pricing")
+    f1, f2, f3 = st.columns([2, 1.4, 1.4])
+    area_pick = f1.selectbox("Area", ["All areas"] + sorted(meters["paidparkingarea"].unique()))
+    action_pick = f2.selectbox("Recommended action",
+                               ["All", "decrease", "hold", "increase"])
+    sort_pick = f3.selectbox("Sort by",
+                             ["Lowest occupancy", "Highest occupancy", "Most spaces"])
 
-    if rev_summary.empty:
-        st.error("Revenue data not generated. Run `python scripts/revenue_analyzer.py`.")
-        st.stop()
+    view = meters.copy()
+    if area_pick != "All areas":
+        view = view[view["paidparkingarea"] == area_pick]
+    if action_pick != "All":
+        view = view[view["primary_action"] == action_pick]
 
-    total_current = rev_summary["current_revenue"].sum()
-    total_optimized = rev_summary["optimized_revenue"].sum()
-    total_uplift = total_optimized - total_current
-    uplift_pct = total_uplift / max(total_current, 0.01) * 100
-
-    n_days = rev_summary["date"].nunique()
-    annual_current = total_current / max(n_days, 1) * 365
-    annual_optimized = total_optimized / max(n_days, 1) * 365
-    annual_uplift = annual_optimized - annual_current
-
-    daily_series = rev_summary.sort_values("date")["current_revenue"].tail(14)
-
-    c1, c2 = st.columns([1.7, 1])
-    with c1:
-        hero_with_sparkline(
-            "Potential uplift",
-            f"${total_uplift:+,.0f}",
-            f"+{uplift_pct:.1f}% gain available &middot; revenue trend, 14 days",
-            daily_series.tolist(),
-        )
-    with c2:
-        cc1, cc2 = st.columns(2)
-        with cc1:
-            stat_cell("Current revenue", f"${total_current:,.0f}", f"Over {n_days} days", "kpi-neutral")
-        with cc2:
-            stat_cell("Optimized revenue", f"${total_optimized:,.0f}", "At 80% occupancy", "kpi-good")
-        stat_cell("Annual projection", f"${annual_uplift:+,.0f}", "Incremental per year", "kpi-good")
-
-    callout("""
-        <b>How to read this.</b> "Current" is what meters actually earned at today's rates and
-        occupancy. "Optimized" is projected earnings if occupancy reaches the city's 80% target
-        with SMC 11.16.121 rate adjustments. The uplift is always positive — the city is leaving
-        money on the table relative to target utilization.
-    """)
-
-    section("Revenue trend")
-
-    fig = go.Figure()
-    fig.add_trace(go.Bar(
-        x=rev_summary["date"], y=rev_summary["current_revenue"],
-        name="Current revenue", marker_color=ACCENT,
-        opacity=0.85,
-    ))
-    if "target_revenue" in rev_summary.columns:
-        fig.add_trace(go.Scatter(
-            x=rev_summary["date"], y=rev_summary["target_revenue"],
-            name="At 80% occupancy (current rates)",
-            line=dict(color=WARN, width=2, dash="dot"),
-        ))
-    fig.add_trace(go.Scatter(
-        x=rev_summary["date"], y=rev_summary["optimized_revenue"],
-        name="Optimized (80% occ + optimal rates)",
-        line=dict(color=GOOD, width=2.5),
-    ))
-    fig.update_layout(
-        title="Daily revenue — current vs potential",
-        yaxis_title="Revenue ($)",
-        barmode="overlay",
-        height=380,
-        **PLOTLY_THEME,
-    )
-    st.plotly_chart(fig, use_container_width=True)
-
-    if not rev_detail.empty:
-        col_left, col_right = st.columns(2)
-
-        with col_left:
-            section("Uplift by region")
-            region_uplift = (
-                rev_detail.groupby("region")
-                .agg(
-                    current=("current_revenue_per_hour", "sum"),
-                    optimized=("optimized_revenue_per_hour", "sum"),
-                )
-                .assign(uplift=lambda x: x["optimized"] - x["current"])
-                .sort_values("uplift", ascending=True)
-                .reset_index()
-            )
-            fig2 = go.Figure(go.Bar(
-                x=region_uplift["uplift"],
-                y=region_uplift["region"],
-                orientation="h",
-                marker_color=GOOD,
-                text=region_uplift["uplift"].map("${:,.0f}".format),
-                textposition="outside",
-            ))
-            fig2.update_layout(
-                title="Revenue uplift by region ($/period)",
-                xaxis_title="Uplift ($)",
-                height=320,
-                **PLOTLY_THEME,
-            )
-            st.plotly_chart(fig2, use_container_width=True)
-
-        with col_right:
-            section("Uplift heatmap — hour × region")
-            pivot = rev_detail.pivot_table(
-                index="hour_of_day", columns="region",
-                values="revenue_uplift", aggfunc="mean",
-            )
-            fig3 = px.imshow(
-                pivot,
-                labels={"x": "Region", "y": "Hour", "color": "Uplift ($/hr)"},
-                color_continuous_scale=[[0, "#F1F5F9"], [1, GOOD]],
-                title="Revenue uplift per hour by region",
-                height=320,
-            )
-            fig3.update_layout(**PLOTLY_THEME)
-            st.plotly_chart(fig3, use_container_width=True)
-
-
-# ── Page: Forecast ────────────────────────────────────────────────────────────
-
-elif page == "Forecast":
-    st.title("Demand forecast")
-    st.caption("7-day occupancy predictions by region — LightGBM model")
-
-    if model is None:
-        st.error("No trained model found. Run `python scripts/train_model.py` first.")
-        st.stop()
-    if features.empty:
-        st.error("No feature data. Run the pipeline first.")
-        st.stop()
-
-    perf_r2 = perf.get("r2", 0)
-    perf_rmse = perf.get("rmse", 0)
-    stat_row([
-        {"label": "Model R²", "value": f"{perf_r2:.3f}", "delta": "Variance explained",
-         "delta_class": "kpi-good" if perf_r2 > 0.85 else "kpi-warn", "hero": True},
-        {"label": "RMSE", "value": f"{perf_rmse:.3f}", "delta": "Occupancy error"},
-        {"label": "Samples", "value": f"{int(perf.get('n_train', 0)):,}", "delta": "12-mo window"},
-    ])
-
-    last_hour = features["hour"].max()
-    future_hours = pd.date_range(
-        start=last_hour + pd.Timedelta(hours=1), periods=7 * 24, freq="h"
-    )
-    regions = features["region"].unique()
-    future = pd.MultiIndex.from_product([future_hours, regions], names=["hour", "region"])
-    future_df = pd.DataFrame(index=future).reset_index()
-
-    future_df["hour_of_day"] = future_df["hour"].dt.hour
-    future_df["day_of_week"] = future_df["hour"].dt.dayofweek
-    future_df["month"] = future_df["hour"].dt.month
-    future_df["year"] = future_df["hour"].dt.year
-    future_df["is_weekend"] = future_df["day_of_week"] >= 5
-    future_df["is_peak_am"] = future_df["hour_of_day"].between(10, 13)
-    future_df["is_peak_pm"] = future_df["hour_of_day"].between(17, 19)
-    future_df["hour_sin"] = np.sin(2 * np.pi * future_df["hour_of_day"] / 24)
-    future_df["hour_cos"] = np.cos(2 * np.pi * future_df["hour_of_day"] / 24)
-    future_df["dow_sin"] = np.sin(2 * np.pi * future_df["day_of_week"] / 7)
-    future_df["dow_cos"] = np.cos(2 * np.pi * future_df["day_of_week"] / 7)
-    future_df["month_sin"] = np.sin(2 * np.pi * future_df["month"] / 12)
-    future_df["month_cos"] = np.cos(2 * np.pi * future_df["month"] / 12)
-
-    space_avgs = features.groupby("region")["total_spaces"].mean()
-    future_df["total_spaces"] = future_df["region"].map(space_avgs).fillna(100)
-    future_df["num_blockfaces"] = (
-        features.groupby("region")["num_blockfaces"].mean()
-        .reindex(future_df["region"]).values
+    view = view.sort_values(
+        {"Lowest occupancy": "avg_occupancy",
+         "Highest occupancy": "avg_occupancy",
+         "Most spaces": "spaces"}[sort_pick],
+        ascending=(sort_pick == "Lowest occupancy"),
     )
 
-    for col in feat_cols:
-        if col not in future_df.columns:
-            future_df[col] = 0
-    for col in feat_cols:
-        if future_df[col].dtype == bool:
-            future_df[col] = future_df[col].astype(int)
-
-    future_df["predicted_occupancy"] = model.predict(
-        future_df[[c for c in feat_cols if c in future_df.columns]].fillna(0)
-    ).clip(0, 1)
-
-    selected_region = st.selectbox("Select region", sorted(regions))
-    region_forecast = future_df[future_df["region"] == selected_region].copy()
-
-    over = region_forecast[region_forecast["predicted_occupancy"] > 0.85]
-    under = region_forecast[region_forecast["predicted_occupancy"] < 0.70]
+    search = st.text_input("Find a blockface", placeholder="e.g. PIKE ST, 1ST AVE, BROADWAY")
+    if search:
+        view = view[view["blockfacename"].str.contains(search, case=False, na=False)]
 
     stat_row([
-        {"label": "Avg predicted", "value": f"{region_forecast['predicted_occupancy'].mean():.1%}",
-         "delta": "Next 7 days", "hero": True},
-        {"label": "Hours over 85%", "value": str(len(over)), "delta": "Rate increase window",
-         "delta_class": "kpi-bad" if len(over) > 0 else "kpi-neutral"},
-        {"label": "Hours under 70%", "value": str(len(under)), "delta": "Demand stimulus window",
-         "delta_class": "kpi-warn" if len(under) > 0 else "kpi-neutral"},
+        {"label": "Blockfaces shown", "value": f"{len(view):,}", "hero": True,
+         "delta": f"of {len(meters):,} citywide"},
+        {"label": "Spaces", "value": f"{int(view['spaces'].sum()):,}"},
+        {"label": "Mean occupancy",
+         "value": f"{view['avg_occupancy'].mean():.1%}" if len(view) else "—"},
     ])
 
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=region_forecast["hour"], y=region_forecast["predicted_occupancy"],
-        fill="tozeroy", fillcolor="rgba(10,90,140,0.08)",
-        line=dict(color=ACCENT, width=2),
-        name="Predicted occupancy",
-    ))
-    if not over.empty:
-        fig.add_trace(go.Scatter(
-            x=over["hour"], y=over["predicted_occupancy"],
-            mode="markers", marker=dict(color=BAD, size=6, symbol="diamond"),
-            name=">85% (raise rates)",
-        ))
-    fig.add_hrect(y0=0.70, y1=0.85, fillcolor="rgba(17,97,73,0.06)", line_width=0,
-                  annotation_text="Target band", annotation_position="top left")
-    fig.add_hline(y=0.85, line_dash="dash", line_color=BAD, line_width=1)
-    fig.add_hline(y=0.70, line_dash="dash", line_color=WARN, line_width=1)
-    fig.update_layout(
-        title=f"7-day occupancy forecast — {selected_region}",
-        height=400,
-        **{**PLOTLY_THEME, "yaxis": dict(tickformat=".0%", range=[0, 1], gridcolor=LINE)},
-    )
-    st.plotly_chart(fig, use_container_width=True)
+    if view.empty:
+        st.info("No blockfaces match those filters.")
+        st.stop()
 
-    if not over.empty:
-        section("High-demand hours (>85%) — action required")
-        disp = (
-            over[["hour", "predicted_occupancy"]]
-            .copy()
-            .assign(
-                Date=lambda x: x["hour"].dt.strftime("%a %b %d"),
-                Hour=lambda x: x["hour"].dt.strftime("%H:00"),
-                Occupancy=lambda x: x["predicted_occupancy"].map("{:.1%}".format),
-                Action=lambda x: "Raise rate by $0.25–$0.50",
-            )
-            [["Date", "Hour", "Occupancy", "Action"]]
+    section("Blockfaces")
+    table = view[[
+        "blockfacename", "paidparkingarea", "avg_occupancy", "peak_hour_occupancy",
+        "peak_hour", "spaces", "mean_adjustment", "primary_action",
+    ]].copy()
+    table["avg_occupancy"] = table["avg_occupancy"].map("{:.1%}".format)
+    table["peak_hour_occupancy"] = table["peak_hour_occupancy"].map("{:.1%}".format)
+    table["peak_hour"] = table["peak_hour"].map(fmt_hour)
+    table["spaces"] = table["spaces"].round(0).astype(int)
+    table["mean_adjustment"] = table["mean_adjustment"].map(adjustment_text)
+    table.columns = ["Blockface", "Area", "Avg occ.", "Peak occ.", "Peak hour",
+                     "Spaces", "Rate change", "Action"]
+
+    def colour_action(v):
+        return {"increase": f"background-color:#FBEEEE;color:{BAD}",
+                "decrease": f"background-color:#EAF1F6;color:{ACCENT}",
+                "hold": f"background-color:#EAF3EF;color:{GOOD}"}.get(v, f"color:{MUTED}")
+
+    st.dataframe(table.style.map(colour_action, subset=["Action"]),
+                 use_container_width=True, hide_index=True, height=460)
+
+    section("Hour-by-hour detail")
+    pick = st.selectbox("Blockface", view["blockfacename"].tolist())
+    detail = recs[recs["blockfacename"] == pick].sort_values("hour_of_day")
+
+    if detail.empty:
+        st.info("No hourly detail for this blockface.")
+    else:
+        figd = go.Figure()
+        figd.add_trace(go.Bar(
+            x=detail["hour_of_day"], y=detail["avg_occupancy"],
+            marker_color=[BAD if a == "increase" else (GOOD if a == "hold" else ACCENT)
+                          for a in detail["action"]],
+            text=detail["rate_adjustment"].map(lambda v: "" if v == 0 else f"{v:+.2f}"),
+            textposition="outside",
+            hovertemplate="%{x}:00<br>Occupancy %{y:.1%}<extra></extra>",
+        ))
+        figd.add_hrect(y0=0.70, y1=0.85, fillcolor="rgba(17,97,73,0.10)", line_width=0,
+                       annotation_text="target band")
+        figd.update_yaxes(tickformat=".0%", range=[0, 1])
+        figd.update_layout(title=f"{pick} — occupancy and recommended rate change by hour",
+                           xaxis_title="Hour of day", height=380, **PLOTLY_THEME)
+        st.plotly_chart(figd, use_container_width=True)
+
+        meta = view[view["blockfacename"] == pick].iloc[0]
+        st.caption(
+            f"{meta['paidparkingarea']} · {int(meta['spaces'])} spaces · "
+            f"{int(meta.get('n_meters', 1))} meter(s) · "
+            f"{int(meta['time_limit']) if pd.notna(meta.get('time_limit')) else '—'} min limit"
         )
-        st.dataframe(disp, use_container_width=True, hide_index=True)
 
 
 # ── Page: Pricing ─────────────────────────────────────────────────────────────
 
 elif page == "Pricing":
-    st.title("Dynamic pricing recommendations")
+    st.title("Rate recommendations")
     st.caption("Seattle Municipal Code 11.16.121 — Performance-Based Parking Pricing")
 
     callout("""
-        <b>Legal authority.</b> SMC 11.16.121 authorizes meter rate adjustments to achieve
-        70–85% occupancy. Rate bounds: <b>$0.50–$8.00/hour</b>.
-        Rate changes require City Council approval.
+        <b>Rate changes are relative.</b> Seattle publishes no per-meter posted
+        rate — the <code>paidparkingrate</code> field in the city's own occupancy
+        feed is empty on all 25.2M records. Rather than invent a baseline, every
+        figure below is an adjustment to apply to the rate currently posted at
+        that blockface. Legal bounds: <b>$0.50–$8.00/hr</b>. Rate changes require
+        City Council approval.
     """, kind="legal")
 
-    if pricing.empty:
-        st.error("No pricing recommendations. Run `python scripts/pricing_optimizer.py`.")
-        st.stop()
-
-    increases = (pricing["action"] == "increase").sum()
-    decreases = (pricing["action"] == "decrease").sum()
-    holds = (pricing["action"] == "hold").sum()
-    rev_impact = pricing["revenue_delta"].sum() if "revenue_delta" in pricing.columns else 0
-
+    counts = meters["primary_action"].value_counts()
     stat_row([
-        {"label": "Total revenue impact", "value": f"${rev_impact:+,.0f}/hr", "delta": "If all changes applied",
-         "delta_class": "kpi-good" if rev_impact >= 0 else "kpi-warn", "hero": True},
-        {"label": "Rate increases", "value": str(increases), "delta": "Zones over 85%",
-         "delta_class": "kpi-bad" if increases > 0 else "kpi-neutral"},
-        {"label": "Rate decreases", "value": str(decreases), "delta": "Zones under 70%"},
-        {"label": "No change", "value": str(holds), "delta": "In target band", "delta_class": "kpi-good"},
+        {"label": "Blockfaces to lower", "value": f"{int(counts.get('decrease', 0)):,}",
+         "delta": "under 70% occupancy", "delta_class": "kpi-warn", "hero": True},
+        {"label": "To raise", "value": f"{int(counts.get('increase', 0)):,}",
+         "delta": "over 85%", "delta_class": "kpi-bad"},
+        {"label": "Leave alone", "value": f"{int(counts.get('hold', 0)):,}",
+         "delta": "in target band", "delta_class": "kpi-good"},
     ])
 
-    if "revenue_delta" in pricing.columns:
-        section("Revenue impact by region")
-        region_impact = (
-            pricing.groupby("region")["revenue_delta"]
-            .sum()
-            .sort_values(ascending=False)
-            .reset_index()
-        )
-        colors = [GOOD if v >= 0 else BAD for v in region_impact["revenue_delta"]]
-        fig = go.Figure(go.Bar(
-            x=region_impact["region"],
-            y=region_impact["revenue_delta"],
-            marker_color=colors,
-            text=region_impact["revenue_delta"].map("${:+,.0f}".format),
-            textposition="outside",
-        ))
-        fig.add_hline(y=0, line_color=MUTED, line_width=1)
-        fig.update_layout(
-            title="Estimated revenue delta by region ($/hr if all changes applied)",
-            yaxis_title="Revenue impact ($/hr)",
-            height=320,
-            **PLOTLY_THEME,
-        )
-        st.plotly_chart(fig, use_container_width=True)
-
-    section("Recommendations table")
-    fc1, fc2 = st.columns(2)
-    region_filter = fc1.selectbox("Filter by region", ["All"] + sorted(pricing["region"].unique()))
-    action_filter = fc2.selectbox("Filter by action", ["All", "increase", "decrease", "hold"])
-
-    disp = pricing.copy()
-    if region_filter != "All":
-        disp = disp[disp["region"] == region_filter]
-    if action_filter != "All":
-        disp = disp[disp["action"] == action_filter]
-
-    def color_action(val):
-        if val == "increase":
-            return f"background-color:#FBEEEE;color:{BAD}"
-        if val == "decrease":
-            return f"background-color:#EAF1F6;color:{ACCENT}"
-        return f"color:{MUTED}"
-
-    styled = disp[["region", "hour_of_day", "avg_predicted_occupancy",
-                    "current_rate", "recommended_rate", "rate_change",
-                    "action", "revenue_delta"]].copy()
-    styled["avg_predicted_occupancy"] = styled["avg_predicted_occupancy"].map("{:.1%}".format)
-    styled["current_rate"] = styled["current_rate"].map("${:.2f}".format)
-    styled["recommended_rate"] = styled["recommended_rate"].map("${:.2f}".format)
-    styled["rate_change"] = styled["rate_change"].map("${:+.2f}".format)
-    styled["revenue_delta"] = styled["revenue_delta"].map("${:+.2f}".format)
-    styled.columns = ["Region", "Hour", "Pred. occ.", "Current rate",
-                      "Rec. rate", "Change", "Action", "Rev. impact/hr"]
-    st.dataframe(
-        styled.style.map(color_action, subset=["Action"]),
-        use_container_width=True, hide_index=True,
+    section("Average recommended change by area")
+    by_area = (
+        meters.groupby("paidparkingarea")
+        .agg(mean_adjustment=("mean_adjustment", "mean"),
+             blockfaces=("blockfacename", "count"))
+        .reset_index().sort_values("mean_adjustment")
     )
+    figp = go.Figure(go.Bar(
+        x=by_area["mean_adjustment"], y=by_area["paidparkingarea"], orientation="h",
+        marker_color=[BAD if v > 0 else ACCENT for v in by_area["mean_adjustment"]],
+        text=by_area["mean_adjustment"].map("{:+.2f}".format), textposition="outside",
+        hovertemplate="%{y}<br>%{x:+.2f}/hr<extra></extra>",
+    ))
+    figp.add_vline(x=0, line_color=MUTED, line_width=1)
+    figp.update_layout(title="Recommended change vs posted rate ($/hr)",
+                       xaxis_title="Adjustment to posted rate ($/hr)",
+                       height=560, **PLOTLY_THEME)
+    st.plotly_chart(figp, use_container_width=True)
+
+    section("Recommendations by hour")
+    ha = st.selectbox("Area", ["All areas"] + sorted(recs["paidparkingarea"].unique()))
+    hv = recs if ha == "All areas" else recs[recs["paidparkingarea"] == ha]
+    hourly = hv.groupby("hour_of_day").agg(
+        occupancy=("avg_occupancy", "mean"),
+        adjustment=("rate_adjustment", "mean"),
+        blockfaces=("blockfacename", "nunique"),
+    ).reset_index()
+
+    figh = go.Figure()
+    figh.add_trace(go.Scatter(x=hourly["hour_of_day"], y=hourly["occupancy"],
+                              name="Occupancy", line=dict(color=ACCENT, width=2.5)))
+    figh.add_trace(go.Bar(x=hourly["hour_of_day"], y=hourly["adjustment"],
+                          name="Rate change ($/hr)", marker_color=WARN,
+                          opacity=0.55, yaxis="y2"))
+    figh.add_hrect(y0=0.70, y1=0.85, fillcolor="rgba(17,97,73,0.10)", line_width=0)
+    figh.update_layout(
+        title=f"Occupancy and recommended rate change — {ha}",
+        xaxis_title="Hour of day", height=400,
+        yaxis=dict(title="Occupancy", tickformat=".0%", range=[0, 1], gridcolor=LINE),
+        yaxis2=dict(title="Rate change ($/hr)", overlaying="y", side="right",
+                    showgrid=False),
+        **{k: v for k, v in PLOTLY_THEME.items() if k not in ("yaxis",)},
+    )
+    st.plotly_chart(figh, use_container_width=True)
 
 
-# ── Page: Infrastructure ROI ──────────────────────────────────────────────────
+# ── Page: Utilization ─────────────────────────────────────────────────────────
+
+elif page == "Utilization":
+    st.title("Utilization and revenue opportunity")
+    st.caption("Measured in space-hours — the quantity the city actually observes")
+
+    if util.empty:
+        st.error("Run `python scripts/revenue_analyzer.py` first.")
+        st.stop()
+
+    occupied = util["occupied_space_hours"].sum()
+    target = util["target_space_hours"].sum()
+    unsold = util["unsold_space_hours"].sum()
+    pct = occupied / target * 100 if target else 0
+
+    c1, c2 = st.columns([1.7, 1])
+    with c1:
+        hero_with_sparkline(
+            "Unsold space-hours vs target",
+            f"{unsold/1e6:,.1f}M",
+            f"Running at {pct:.0f}% of the 80% target &middot; daily trend",
+            util.sort_values("date")["occupied_space_hours"].tail(14).tolist(),
+        )
+    with c2:
+        cc1, cc2 = st.columns(2)
+        with cc1:
+            stat_cell("Occupied", f"{occupied/1e6:,.1f}M", "space-hours sold", "kpi-neutral")
+        with cc2:
+            stat_cell("Utilization", f"{util['utilization_pct'].mean():.0f}%",
+                      "of capacity", "kpi-warn")
+        stat_cell("At 80% target", f"{target/1e6:,.1f}M", "space-hours", "kpi-neutral")
+
+    callout("""
+        <b>Why there are no dollar totals.</b> Revenue equals rate x occupied
+        space-hours. Seattle publishes the occupancy but not the per-meter rate,
+        so any dollar figure here would be built on an invented number. Multiply
+        the space-hours by the real posted rate to get dollars — at $2.00/hr,
+        the unsold gap above is worth roughly
+        <b>$""" + f"{unsold*2/1e6:,.0f}M" + """</b> in foregone revenue.
+    """)
+
+    section("Utilization over time")
+    figu = go.Figure()
+    figu.add_trace(go.Scatter(x=util["date"], y=util["occupied_space_hours"],
+                              name="Occupied", fill="tozeroy",
+                              fillcolor="rgba(10,90,140,0.12)",
+                              line=dict(color=ACCENT, width=2)))
+    figu.add_trace(go.Scatter(x=util["date"], y=util["target_space_hours"],
+                              name="80% target", line=dict(color=GOOD, width=2, dash="dot")))
+    figu.update_layout(title="Daily space-hours: occupied vs target",
+                       yaxis_title="Space-hours", height=400, **PLOTLY_THEME)
+    st.plotly_chart(figu, use_container_width=True)
+
+    if not area_hr.empty:
+        section("Where the gap is largest")
+        gap = (area_hr.groupby("paidparkingarea")
+               .agg(unsold=("unsold_space_hours", "sum"),
+                    occupancy=("avg_occupancy", "mean"))
+               .reset_index().sort_values("unsold", ascending=True).tail(15))
+        figg = go.Figure(go.Bar(
+            x=gap["unsold"], y=gap["paidparkingarea"], orientation="h",
+            marker_color=WARN,
+            text=gap["occupancy"].map("{:.0%} occ".format), textposition="outside",
+        ))
+        figg.update_layout(title="Unsold space-hours per average hour, by area",
+                           xaxis_title="Unsold space-hours", height=520, **PLOTLY_THEME)
+        st.plotly_chart(figg, use_container_width=True)
+
+
+# ── Page: Infrastructure ──────────────────────────────────────────────────────
 
 elif page == "Infrastructure":
-    st.title("Infrastructure investment ROI")
-    st.caption("Cost-benefit analysis: should Seattle build more parking capacity?")
+    st.title("Infrastructure investment")
+    st.caption("Should Seattle build more paid parking capacity?")
 
     if roi_df.empty:
-        st.error("No ROI data. Run `python scripts/infrastructure_roi.py`.")
+        st.error("Run `python scripts/infrastructure_roi.py` first.")
         st.stop()
 
     viable = roi_df[roi_df["viable"]]
-    best_roi = viable["roi_percent"].max() if not viable.empty else 0
-    best_payback = viable["payback_years"].min() if not viable.empty else 0
+    cheapest = roi_df["breakeven_rate_per_hour"].min()
 
     stat_row([
-        {"label": "Best ROI", "value": f"{best_roi:.1f}%", "delta": "Top viable scenario",
-         "delta_class": "kpi-good" if best_roi > 0 else "kpi-neutral", "hero": True},
-        {"label": "Scenarios analyzed", "value": str(len(roi_df))},
-        {"label": "Viable investments", "value": str(len(viable)), "delta": "Breakeven < demand",
-         "delta_class": "kpi-good" if len(viable) > 0 else "kpi-warn"},
-        {"label": "Fastest payback", "value": f"{best_payback:.1f} yrs" if best_payback > 0 else "N/A"},
+        {"label": "Viable projects", "value": f"{len(viable)}",
+         "delta": "of {} scenarios".format(len(roi_df)),
+         "delta_class": "kpi-good" if len(viable) else "kpi-warn", "hero": True},
+        {"label": "Lowest breakeven rate", "value": f"${cheapest:.2f}/hr",
+         "delta": "to cover costs"},
+        {"label": "Areas assessed", "value": f"{roi_df['paidparkingarea'].nunique()}"},
     ])
 
-    col1, col2 = st.columns(2)
-    region_filter = col1.selectbox("Region", ["All"] + sorted(roi_df["region"].unique()))
-    infra_filter = col2.selectbox("Infrastructure type", ["All"] + sorted(roi_df["infra_type"].unique()))
+    if viable.empty:
+        callout("""
+            <b>No expansion is justified right now.</b> A project only makes sense
+            if existing capacity is already near the 80% target — and no area in
+            Seattle currently is. Adding spaces where blocks sit two-thirds empty
+            would lower utilization further and add debt service against
+            unsold capacity. The figures below show what each project
+            <em>would</em> require if demand recovered.
+        """)
 
-    disp = roi_df.copy()
-    if region_filter != "All":
-        disp = disp[disp["region"] == region_filter]
-    if infra_filter != "All":
-        disp = disp[disp["infra_type"] == infra_filter]
-
-    col_left, col_right = st.columns(2)
-
-    with col_left:
-        section("ROI by scenario")
-        fig = px.bar(
-            disp.sort_values("roi_percent", ascending=False),
-            x="region", y="roi_percent", color="infra_type",
-            barmode="group", facet_col="n_new_spaces",
-            labels={"roi_percent": "ROI %", "region": "Region", "infra_type": "Type"},
-            height=380,
-            color_discrete_map={"surface_lot": ACCENT, "structured_garage": WARN,
-                                 "underground": BAD},
-        )
-        fig.add_hline(y=0, line_dash="solid", line_color=BAD, line_width=1)
-        fig.update_layout(**PLOTLY_THEME)
-        st.plotly_chart(fig, use_container_width=True)
-
-    with col_right:
-        section("Breakeven vs current occupancy")
-        fig2 = px.scatter(
-            disp,
-            x="current_occupancy", y="breakeven_occupancy",
-            color="viable", size="n_new_spaces",
-            hover_name="region",
-            hover_data={"roi_percent": ":.1f", "payback_years": ":.1f"},
-            color_discrete_map={True: GOOD, False: BAD},
-            labels={"current_occupancy": "Current occupancy",
-                    "breakeven_occupancy": "Breakeven occupancy"},
-            height=380,
-        )
-        fig2.add_shape(type="line", x0=0, y0=0, x1=1, y1=1,
-                       line=dict(dash="dash", color=MUTED))
-        fig2.update_xaxes(tickformat=".0%")
-        fig2.update_yaxes(tickformat=".0%")
-        fig2.update_layout(**PLOTLY_THEME)
-        st.caption("Points below the diagonal are viable (current demand exceeds breakeven).")
-        st.plotly_chart(fig2, use_container_width=True)
-
-    section("Scenario details")
-    table = disp[[
-        "region", "infra_type", "n_new_spaces", "current_occupancy",
-        "breakeven_occupancy", "total_construction_cost",
-        "net_annual_income", "roi_percent", "payback_years", "viable"
-    ]].copy()
-    table["current_occupancy"] = table["current_occupancy"].map("{:.1%}".format)
-    table["breakeven_occupancy"] = table["breakeven_occupancy"].map("{:.1%}".format)
-    table["total_construction_cost"] = table["total_construction_cost"].map("${:,.0f}".format)
-    table["net_annual_income"] = table["net_annual_income"].map("${:+,.0f}".format)
-    table["roi_percent"] = table["roi_percent"].map("{:.1f}%".format)
-    table.columns = ["Region", "Type", "Spaces", "Curr. occ.", "Breakeven",
-                     "Construction cost", "Net annual", "ROI %", "Payback (yrs)", "Viable"]
-    st.dataframe(
-        table.style.map(
-            lambda v: "background-color:#EAF3EF" if v is True else
-                      ("background-color:#FBEEEE" if v is False else ""),
-            subset=["Viable"]
-        ),
-        use_container_width=True, hide_index=True,
+    section("Breakeven rate by project type")
+    figr = px.box(
+        roi_df, x="infra_type", y="breakeven_rate_per_hour", color="infra_type",
+        labels={"infra_type": "", "breakeven_rate_per_hour": "Breakeven rate ($/hr)"},
+        height=420, color_discrete_sequence=AREA_PALETTE,
     )
-    st.caption("Costs: surface lot $5K/space, structured garage $45K/space, underground $90K/space. Bond: 4.5%, 20yr.")
+    figr.add_hline(y=8.00, line_dash="dash", line_color=BAD,
+                   annotation_text="$8.00 legal cap (SMC 11.16.121)")
+    figr.update_layout(title="Hourly rate required to cover debt service and operations",
+                       showlegend=False, **PLOTLY_THEME)
+    st.plotly_chart(figr, use_container_width=True)
+
+    section("Scenario detail")
+    itype = st.selectbox("Project type", ["All"] + sorted(roi_df["infra_type"].unique()))
+    rv = roi_df if itype == "All" else roi_df[roi_df["infra_type"] == itype]
+    tbl = rv[["paidparkingarea", "infra_type", "n_new_spaces", "current_occupancy",
+              "total_construction_cost", "total_annual_cost",
+              "breakeven_rate_per_hour", "viable"]].copy()
+    tbl["current_occupancy"] = tbl["current_occupancy"].map("{:.1%}".format)
+    tbl["total_construction_cost"] = tbl["total_construction_cost"].map("${:,.0f}".format)
+    tbl["total_annual_cost"] = tbl["total_annual_cost"].map("${:,.0f}".format)
+    tbl["breakeven_rate_per_hour"] = tbl["breakeven_rate_per_hour"].map("${:.2f}".format)
+    tbl.columns = ["Area", "Type", "New spaces", "Current occ.",
+                   "Build cost", "Annual cost", "Breakeven rate", "Viable"]
+    st.dataframe(tbl, use_container_width=True, hide_index=True, height=420)
+    st.caption("Surface lot $5K/space · structured garage $45K/space · "
+               "underground $90K/space. Municipal bond 4.5% over 20 years.")
 
 
-# ── Page: Geo Map ─────────────────────────────────────────────────────────────
+# ── Page: Map ─────────────────────────────────────────────────────────────────
 
-elif page == "Geo Map":
-    import json as _json
+elif page == "Map":
+    from folium.plugins import MarkerCluster
 
-    st.title("Parking demand map")
-    st.caption("Neighborhood polygons from Seattle Open Data · Circle size = avg parking spaces · Click for full stats")
+    st.title("Blockface map")
+    st.caption("Every metered blockface in Seattle. Zoom in to separate clusters; "
+               "click a marker for detail.")
 
-    if features.empty:
-        st.error("No data to display.")
+    geo = meters.dropna(subset=["lat", "lon"])
+    if geo.empty:
+        st.error("No coordinates available. Run `python scripts/fetch_meter_registry.py`.")
         st.stop()
 
-    REGION_COORDS = {
-        "Downtown Seattle":      (47.6081, -122.3321),
-        "Capitol Hill":          (47.6238, -122.3184),
-        "South Lake Union":      (47.6232, -122.3384),
-        "Ballard":               (47.6765, -122.3862),
-        "International District":(47.5984, -122.3225),
-    }
+    mc1, mc2 = st.columns([2, 2])
+    map_area = mc1.selectbox("Area", ["All areas"] + sorted(geo["paidparkingarea"].unique()))
+    map_action = mc2.selectbox("Show", ["All blockfaces", "Below target (under 70%)",
+                                        "On target (70–85%)", "Above target (over 85%)"])
 
-    reg_stats = features.groupby("region").agg(
-        avg_occ=("avg_occupancy_rate", "mean"),
-        peak_occ=("peak_occupancy_rate", "mean"),
-        avg_spaces=("total_spaces", "mean"),
-        num_blockfaces=("num_blockfaces", "mean"),
-    ).reset_index()
+    view = geo if map_area == "All areas" else geo[geo["paidparkingarea"] == map_area]
+    action_filter = {"Below target (under 70%)": "decrease",
+                     "On target (70–85%)": "hold",
+                     "Above target (over 85%)": "increase"}.get(map_action)
+    if action_filter:
+        view = view[view["primary_action"] == action_filter]
 
-    peak_hour = (
-        features.groupby(["region", "hour_of_day"])["avg_occupancy_rate"]
-        .mean()
-        .reset_index()
-    )
-    peak_hour = peak_hour.loc[peak_hour.groupby("region")["avg_occupancy_rate"].idxmax()]
-    peak_hour = peak_hour.rename(columns={"hour_of_day": "peak_hour", "avg_occupancy_rate": "_ph_occ"})
-    reg_stats = reg_stats.merge(peak_hour[["region", "peak_hour"]], on="region", how="left")
+    st.caption(f"Showing {len(view):,} of {len(geo):,} blockfaces")
 
-    if not rev_detail.empty:
-        rev_by_region = rev_detail.groupby("region").agg(
-            current_rate=("current_rate", "mean"),
-            recommended_rate=("recommended_rate", "mean"),
-            daily_current=("current_revenue_per_hour", "sum"),
-            daily_optimized=("optimized_revenue_per_hour", "sum"),
-        ).reset_index()
-        reg_stats = reg_stats.merge(rev_by_region, on="region", how="left")
-    else:
-        reg_stats["current_rate"] = 2.00
-        reg_stats["recommended_rate"] = 2.00
-        reg_stats["daily_current"] = 0.0
-        reg_stats["daily_optimized"] = 0.0
-
-    if not pricing.empty and "action" in pricing.columns:
-        top_action = (
-            pricing.groupby("region")["action"]
-            .agg(lambda x: x.value_counts().index[0])
-            .reset_index()
-            .rename(columns={"action": "top_action"})
-        )
-        reg_stats = reg_stats.merge(top_action, on="region", how="left")
-    if "top_action" not in reg_stats.columns:
-        reg_stats["top_action"] = "hold"
-    else:
-        reg_stats["top_action"] = reg_stats["top_action"].fillna("hold")
-
-    def occ_color(rate):
-        if rate > 0.85:
-            return BAD
-        elif rate >= 0.70:
-            return GOOD
-        else:
-            return ACCENT
-
-    def occ_status(rate):
-        if rate > 0.85:
-            return "High demand (&gt;85%)"
-        elif rate >= 0.70:
-            return "On target (70–85%)"
-        else:
-            return "Underutilized (&lt;70%)"
-
-    action_labels = {"increase": "Raise rates", "decrease": "Lower rates", "hold": "Hold rates"}
-    DISTRICT_COLORS = REGION_COLORS
-
-    min_sp = reg_stats["avg_spaces"].min()
-    max_sp = reg_stats["avg_spaces"].max()
-    def space_radius(spaces):
-        if max_sp == min_sp:
-            return 35
-        return 18 + 32 * (spaces - min_sp) / (max_sp - min_sp)
-
-    _geojson_path = ROOT / "data" / "seattle_5_neighborhoods.geojson"
-    _neighborhoods_geojson = None
-    if _geojson_path.exists():
-        with open(_geojson_path) as _f:
-            _neighborhoods_geojson = _json.load(_f)
-
-    _occ_by_district = dict(zip(reg_stats["region"], reg_stats["avg_occ"]))
+    if view.empty:
+        st.info("No blockfaces match those filters.")
+        st.stop()
 
     m = folium.Map(
-        location=[47.630, -122.330],
-        zoom_start=12,
-        tiles="CartoDB positron",
-        prefer_canvas=True,
+        location=[view["lat"].mean(), view["lon"].mean()],
+        zoom_start=13 if map_area != "All areas" else 12,
+        tiles="CartoDB positron", prefer_canvas=True,
     )
+    cluster = MarkerCluster(name="Blockfaces").add_to(m)
 
-    if _neighborhoods_geojson:
-        for feat in _neighborhoods_geojson["features"]:
-            district = feat["properties"]["neighborhood"]
-            rate = _occ_by_district.get(district, 0.5)
-            color = DISTRICT_COLORS.get(district, "#888888")
-            folium.GeoJson(
-                feat,
-                style_function=lambda x, c=color: {
-                    "fillColor":   c,
-                    "color":       c,
-                    "weight":      2.5,
-                    "fillOpacity": 0.10,
-                },
-                tooltip=folium.Tooltip(
-                    f"<b>{district}</b><br>Avg occupancy: {rate:.0%}",
-                    sticky=False,
-                ),
-            ).add_to(m)
-
-    for _, row in reg_stats.iterrows():
-        coords = REGION_COORDS.get(row["region"])
-        if not coords:
-            continue
-
-        color = DISTRICT_COLORS.get(row["region"], occ_color(row["avg_occ"]))
-        occ_col = occ_color(row["avg_occ"])
-        radius = space_radius(row["avg_spaces"])
-        action = row["top_action"]
-        peak_h = int(row["peak_hour"]) if pd.notna(row.get("peak_hour")) else 0
-        peak_label = f"{peak_h % 12 or 12}{'am' if peak_h < 12 else 'pm'}"
-
-        popup_html = f"""
-        <div style="font-family:'Source Sans 3',Arial,sans-serif;min-width:220px;background:{CARD};color:{BODY};
-                    border-radius:8px;padding:14px;border-left:4px solid {color};box-shadow:0 1px 4px rgba(15,23,42,0.12)">
-            <div style="font-size:14px;font-weight:700;color:{color};margin-bottom:10px;
-                        border-bottom:1px solid {LINE};padding-bottom:6px">
-                {row['region']}
-            </div>
-            <table style="width:100%;border-collapse:collapse;font-size:12px">
-                <tr>
-                    <td style="color:{MUTED};padding:3px 0">Avg occupancy</td>
-                    <td style="text-align:right;font-weight:700;color:{occ_col}">{row['avg_occ']:.0%}</td>
-                </tr>
-                <tr>
-                    <td style="color:{MUTED};padding:3px 0">Peak occupancy</td>
-                    <td style="text-align:right;font-weight:700;color:{INK}">{row['peak_occ']:.0%}</td>
-                </tr>
-                <tr>
-                    <td style="color:{MUTED};padding:3px 0">Peak hour</td>
-                    <td style="text-align:right;font-weight:700;color:{INK}">{peak_label}</td>
-                </tr>
-                <tr>
-                    <td style="color:{MUTED};padding:3px 0">Avg spaces</td>
-                    <td style="text-align:right;font-weight:700;color:{INK}">{int(row['avg_spaces']):,}</td>
-                </tr>
-                <tr>
-                    <td style="color:{MUTED};padding:3px 0">Blockfaces</td>
-                    <td style="text-align:right;font-weight:700;color:{INK}">{int(row['num_blockfaces'])}</td>
-                </tr>
-                <tr style="border-top:1px solid {LINE}">
-                    <td style="color:{MUTED};padding:5px 0 3px">Current rate</td>
-                    <td style="text-align:right;font-weight:700;color:{INK}">${row.get('current_rate', 0):.2f}/hr</td>
-                </tr>
-                <tr>
-                    <td style="color:{MUTED};padding:3px 0">Recommended</td>
-                    <td style="text-align:right;font-weight:700;color:{occ_col}">${row.get('recommended_rate', 0):.2f}/hr</td>
-                </tr>
-                <tr>
-                    <td style="color:{MUTED};padding:3px 0">Pricing action</td>
-                    <td style="text-align:right;font-weight:700;color:{occ_col}">{action_labels.get(action, action)}</td>
-                </tr>
-            </table>
-            <div style="margin-top:8px;padding:5px 8px;background:{occ_col}14;border-radius:4px;
-                        font-size:11px;color:{occ_col};font-weight:700;text-align:center">
-                {occ_status(row['avg_occ'])}
-            </div>
-        </div>
-        """
-
-        tooltip_html = (
-            f"<b style='color:{color}'>{row['region']}</b><br>"
-            f"Occupancy: <b style='color:{occ_col}'>{row['avg_occ']:.0%}</b><br>"
-            f"Spaces: {int(row['avg_spaces']):,} · Peak: {peak_label}"
-        )
+    for _, r in view.iterrows():
+        occ = r["avg_occupancy"]
+        colour = BAD if occ > 0.85 else (GOOD if occ >= 0.70 else ACCENT)
+        status = ("Above target" if occ > 0.85
+                  else ("On target" if occ >= 0.70 else "Below target"))
+        popup = f"""
+        <div style="font-family:'Source Sans 3',Arial,sans-serif;min-width:230px">
+          <div style="font-size:13px;font-weight:700;color:{colour};
+                      border-bottom:1px solid {LINE};padding-bottom:6px;margin-bottom:8px">
+            {r['blockfacename']}
+          </div>
+          <table style="width:100%;font-size:12px;border-collapse:collapse">
+            <tr><td style="color:{MUTED}">Area</td>
+                <td style="text-align:right;font-weight:700">{r['paidparkingarea']}</td></tr>
+            <tr><td style="color:{MUTED}">Avg occupancy</td>
+                <td style="text-align:right;font-weight:700;color:{colour}">{occ:.0%}</td></tr>
+            <tr><td style="color:{MUTED}">Peak hour</td>
+                <td style="text-align:right;font-weight:700">{fmt_hour(r['peak_hour'])}</td></tr>
+            <tr><td style="color:{MUTED}">Spaces</td>
+                <td style="text-align:right;font-weight:700">{int(r['spaces'])}</td></tr>
+            <tr><td style="color:{MUTED}">Rate change</td>
+                <td style="text-align:right;font-weight:700;color:{colour}">
+                    {adjustment_text(r['mean_adjustment'])}</td></tr>
+          </table>
+          <div style="margin-top:8px;padding:4px 8px;background:{colour}14;
+                      border-radius:4px;font-size:11px;color:{colour};
+                      font-weight:700;text-align:center">{status}</div>
+        </div>"""
 
         folium.CircleMarker(
-            location=coords, radius=radius + 12, color=color, fill=True,
-            fill_color=color, fill_opacity=0.08, weight=1, opacity=0.3,
-        ).add_to(m)
+            location=[r["lat"], r["lon"]],
+            radius=4 + min(float(r["spaces"]), 40) / 6,
+            color=colour, fill=True, fill_color=colour, fill_opacity=0.75,
+            weight=1.5, opacity=0.9,
+            popup=folium.Popup(popup, max_width=280),
+            tooltip=f"{r['blockfacename']} — {occ:.0%}",
+        ).add_to(cluster)
 
-        folium.CircleMarker(
-            location=coords, radius=radius, color=color, fill=True,
-            fill_color=color, fill_opacity=0.85, weight=2, opacity=0.95,
-            popup=folium.Popup(popup_html, max_width=260),
-            tooltip=folium.Tooltip(tooltip_html, sticky=False),
-        ).add_to(m)
+    st_folium(m, use_container_width=True, height=600, returned_objects=[])
 
-        folium.Marker(
-            location=coords,
-            icon=folium.DivIcon(
-                html=f"""<div style="font-family:'Source Sans 3',Arial,sans-serif;font-size:11px;font-weight:700;
-                                     color:white;text-align:center;width:80px;margin-left:-40px;
-                                     text-shadow:0 1px 3px rgba(0,0,0,0.6)">
-                            {row['avg_occ']:.0%}
-                         </div>""",
-                icon_size=(80, 20),
-                icon_anchor=(40, 10),
-            ),
-        ).add_to(m)
-
-    st_folium(m, use_container_width=True, height=540, returned_objects=[])
-
-    section("Region breakdown")
-    cols = st.columns(len(reg_stats))
-    for i, (_, row) in enumerate(reg_stats.sort_values("avg_occ", ascending=False).iterrows()):
-        rate = row["avg_occ"]
-        dcolor = DISTRICT_COLORS.get(row["region"], "#888888")
-        occ_col = occ_color(rate)
-        status = "HIGH DEMAND" if rate > 0.85 else ("ON TARGET" if rate >= 0.70 else "UNDERUTILIZED")
-        action = row["top_action"]
-        peak_h = int(row["peak_hour"]) if pd.notna(row.get("peak_hour")) else 0
-        peak_label = f"{peak_h % 12 or 12}{'am' if peak_h < 12 else 'pm'}"
-        with cols[i]:
-            st.markdown(f"""
-            <div class="region-cell" style="--rc:{dcolor}">
-                <div class="region-name">{row['region']}</div>
-                <div class="region-value" style="color:{occ_col}">{rate:.0%}</div>
-                <div class="region-sub" style="color:{occ_col};font-weight:700">{status}</div>
-                <div class="region-sub" style="margin-top:6px">{int(row['avg_spaces']):,} spaces &middot; peak {peak_label}</div>
-                <div class="region-sub" style="color:{occ_col}">{action}</div>
-            </div>
-            """, unsafe_allow_html=True)
+    section("Legend")
+    l1, l2, l3 = st.columns(3)
+    for col, (lbl, colour, desc) in zip(
+        [l1, l2, l3],
+        [("Below target", ACCENT, "under 70% — lower the rate"),
+         ("On target", GOOD, "70–85% — no change"),
+         ("Above target", BAD, "over 85% — raise the rate")],
+    ):
+        with col:
+            st.markdown(
+                f'<div class="region-cell" style="--rc:{colour}">'
+                f'<div class="region-name" style="color:{colour}">{lbl}</div>'
+                f'<div class="region-sub">{desc}</div></div>',
+                unsafe_allow_html=True)

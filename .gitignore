@@ -9,6 +9,8 @@ data/seattle_event_permits.csv
 data/seattle_road_closures.csv
 data/seattle_holidays.csv
 data/*.pkl
+data/features.parquet
+data/features.csv
 
 # Generated outputs ARE committed (features, pricing, revenue, ROI)
 # so the dashboard works without re-running the pipeline

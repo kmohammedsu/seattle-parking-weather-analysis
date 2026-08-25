@@ -1,126 +1,125 @@
 """
-Revenue analysis — estimates actual and potential revenue from parking occupancy data.
+Utilization and revenue-opportunity analysis, per official parking area.
 
-Three scenarios:
-  current   — actual rates × actual occupancy (what the city earns today)
-  target    — actual rates × 80% occupancy (revenue if utilization were at target)
-  optimized — recommended rates × 80% occupancy (full pricing + utilization upside)
+WHY THERE ARE NO DOLLAR TOTALS HERE
+    Seattle publishes no per-meter posted rate (the `paidparkingrate` column in
+    the occupancy feed is populated on 0 of 25.2M rows). Any absolute dollar
+    figure would therefore rest on invented rates. This module instead reports
+    the quantity that IS measured — occupied space-hours — plus revenue
+    expressed per $1.00 of posted rate, which the city multiplies by the real
+    posted rate to get dollars.
 
-Uplift is always positive: the city is always leaving money on the table relative
-to achieving target utilization with optimal rates.
+    space-hours          one paid space occupied for one hour
+    revenue_per_dollar   revenue generated per $1.00/hr of posted rate
+                         (numerically equal to occupied space-hours)
+
+Outputs
+    data/revenue_summary.csv        daily citywide utilization
+    data/revenue_by_area_hour.csv   area x hour-of-day breakdown
 """
-import pandas as pd
-import numpy as np
 from pathlib import Path
+
+import numpy as np
+import pandas as pd
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = ROOT / "data"
 
-FEATURES_FILE = DATA_DIR / "features.csv"
-PRICING_FILE = DATA_DIR / "pricing_recommendations.csv"
+FEATURES_FILE = DATA_DIR / "features.parquet"
+REGISTRY_FILE = DATA_DIR / "meter_registry.csv"
 REVENUE_SUMMARY_FILE = DATA_DIR / "revenue_summary.csv"
-REVENUE_DETAIL_FILE = DATA_DIR / "revenue_by_region_hour.csv"
+REVENUE_DETAIL_FILE = DATA_DIR / "revenue_by_area_hour.csv"
 
+# Paid parking hours (the feed only carries paid periods anyway)
 METER_START = 8
 METER_END = 20
-HOUR_DURATION = 1.0
-TARGET_OCC = 0.80  # midpoint of 70–85% target band
 
-BASE_RATES = {
-    "Downtown Seattle":    2.50,
-    "Capitol Hill":        2.00,
-    "South Lake Union":    2.00,
-    "Ballard":             1.50,
-    "International District": 1.50,
-}
-
-
-def revenue(spaces: float, occ: float, rate: float) -> float:
-    return rate * spaces * occ * HOUR_DURATION
+# City utilization target — midpoint of the SMC 11.16.121 70-85% band
+TARGET_OCC = 0.80
 
 
 def run():
     if not FEATURES_FILE.exists():
-        print("features.csv not found.")
+        print(f"{FEATURES_FILE.name} not found — run aggregate_features.py first.")
+        return
+    if not REGISTRY_FILE.exists():
+        print("meter_registry.csv not found — run fetch_meter_registry.py first.")
         return
 
-    df = pd.read_csv(FEATURES_FILE, parse_dates=["hour"])
-    df["hour_of_day"] = df["hour"].dt.hour
+    registry = pd.read_csv(REGISTRY_FILE)[["blockfacename", "spaces"]]
+
+    df = pd.read_parquet(
+        FEATURES_FILE,
+        columns=["hour", "blockfacename", "paidparkingarea",
+                 "avg_occupancy_rate", "hour_of_day"],
+    )
+    df = df[df["hour_of_day"].between(METER_START, METER_END - 1)].copy()
     df["date"] = df["hour"].dt.date
 
-    df = df[df["hour_of_day"].between(METER_START, METER_END - 1)].copy()
+    # Authoritative capacity from the registry (the feed averages rather than
+    # sums a blockface's meter keys, understating capacity by ~38%)
+    df = df.merge(registry, on="blockfacename", how="inner")
 
-    df["base_rate"] = df["region"].map(BASE_RATES).fillna(2.00)
+    # The measurable quantities
+    df["occupied_space_hours"] = df["avg_occupancy_rate"] * df["spaces"]
+    df["target_space_hours"] = TARGET_OCC * df["spaces"]
+    df["unsold_space_hours"] = (df["target_space_hours"] - df["occupied_space_hours"]).clip(lower=0)
 
-    # Merge recommended rates
-    if PRICING_FILE.exists():
-        recs = pd.read_csv(PRICING_FILE)[["region", "hour_of_day", "recommended_rate"]]
-        df = df.merge(recs, on=["region", "hour_of_day"], how="left")
-        df["recommended_rate"] = df["recommended_rate"].fillna(df["base_rate"])
-    else:
-        df["recommended_rate"] = df["base_rate"]
-
-    # Three scenarios — all use the same space counts
-    df["current_revenue"] = df.apply(
-        lambda r: revenue(r["total_spaces"], r["avg_occupancy_rate"], r["base_rate"]), axis=1
-    )
-    # Target: what current rates would earn if occupancy hit 80% (utilization opportunity)
-    df["target_revenue"] = df.apply(
-        lambda r: revenue(r["total_spaces"], TARGET_OCC, r["base_rate"]), axis=1
-    )
-    # Optimized: apply rate INCREASES only (rate decreases serve traffic flow, not revenue)
-    # In under-target zones, keep current rate; in over-target zones, apply recommended (higher) rate
-    df["revenue_rate"] = df[["base_rate", "recommended_rate"]].max(axis=1)
-    df["optimized_revenue"] = df.apply(
-        lambda r: revenue(r["total_spaces"], TARGET_OCC, r["revenue_rate"]), axis=1
-    )
-
-    df["revenue_uplift"] = df["optimized_revenue"] - df["current_revenue"]
-    df["utilization_gap"] = df["target_revenue"] - df["current_revenue"]
-
-    # Daily summary
     daily = df.groupby("date").agg(
-        current_revenue=("current_revenue", "sum"),
-        target_revenue=("target_revenue", "sum"),
-        optimized_revenue=("optimized_revenue", "sum"),
-        revenue_uplift=("revenue_uplift", "sum"),
-        utilization_gap=("utilization_gap", "sum"),
+        occupied_space_hours=("occupied_space_hours", "sum"),
+        target_space_hours=("target_space_hours", "sum"),
+        unsold_space_hours=("unsold_space_hours", "sum"),
+        capacity_space_hours=("spaces", "sum"),
         avg_occupancy=("avg_occupancy_rate", "mean"),
-        total_spaces=("total_spaces", "sum"),
+        n_blockfaces=("blockfacename", "nunique"),
     ).reset_index()
-    daily["uplift_pct"] = (
-        daily["revenue_uplift"] / daily["current_revenue"].replace(0, np.nan) * 100
-    ).round(1)
 
-    # Regional × hourly breakdown
-    region_hour = df.groupby(["region", "hour_of_day"]).agg(
+    daily["utilization_pct"] = (
+        daily["occupied_space_hours"] / daily["capacity_space_hours"].replace(0, np.nan) * 100
+    ).round(1)
+    daily["gap_to_target_pct"] = (
+        daily["unsold_space_hours"] / daily["target_space_hours"].replace(0, np.nan) * 100
+    ).round(1)
+    # Revenue per $1.00/hr of posted rate == occupied space-hours
+    daily["revenue_per_posted_dollar"] = daily["occupied_space_hours"].round(1)
+
+    area_hour = df.groupby(["paidparkingarea", "hour_of_day"]).agg(
         avg_occupancy=("avg_occupancy_rate", "mean"),
-        current_revenue_per_hour=("current_revenue", "mean"),
-        target_revenue_per_hour=("target_revenue", "mean"),
-        optimized_revenue_per_hour=("optimized_revenue", "mean"),
-        avg_spaces=("total_spaces", "mean"),
-        current_rate=("base_rate", "mean"),
-        recommended_rate=("recommended_rate", "mean"),
+        occupied_space_hours=("occupied_space_hours", "mean"),
+        target_space_hours=("target_space_hours", "mean"),
+        unsold_space_hours=("unsold_space_hours", "mean"),
+        spaces=("spaces", "mean"),
+        n_blockfaces=("blockfacename", "nunique"),
     ).reset_index()
-    region_hour["revenue_uplift"] = (
-        region_hour["optimized_revenue_per_hour"] - region_hour["current_revenue_per_hour"]
-    )
+    area_hour["revenue_per_posted_dollar"] = area_hour["occupied_space_hours"].round(2)
+
+    for c in ["avg_occupancy"]:
+        daily[c] = daily[c].round(4)
+        area_hour[c] = area_hour[c].round(4)
 
     daily.to_csv(REVENUE_SUMMARY_FILE, index=False)
-    region_hour.to_csv(REVENUE_DETAIL_FILE, index=False)
+    area_hour.to_csv(REVENUE_DETAIL_FILE, index=False)
 
-    total_current = daily["current_revenue"].sum()
-    total_target = daily["target_revenue"].sum()
-    total_optimized = daily["optimized_revenue"].sum()
-    print(f"Revenue analysis: {len(daily)} days")
-    print(f"  Current revenue:   ${total_current:,.2f}  (actual rates × actual occupancy)")
-    print(f"  Target revenue:    ${total_target:,.2f}  (actual rates × 80% occupancy)")
-    print(f"  Optimized revenue: ${total_optimized:,.2f}  (optimal rates × 80% occupancy)")
-    print(f"  Full uplift:       ${total_optimized - total_current:+,.2f} "
-          f"({(total_optimized / max(total_current, 0.01) - 1) * 100:+.1f}%)")
-    print(f"Saved → {REVENUE_SUMMARY_FILE}, {REVENUE_DETAIL_FILE}")
+    occ = daily["occupied_space_hours"].sum()
+    tgt = daily["target_space_hours"].sum()
+    unsold = daily["unsold_space_hours"].sum()
 
-    return daily, region_hour
+    print(f"Utilization analysis: {len(daily):,} days, "
+          f"{df['blockfacename'].nunique():,} blockfaces, "
+          f"{df['paidparkingarea'].nunique()} areas")
+    print(f"  Occupied      : {occ:>14,.0f} space-hours "
+          f"({daily['utilization_pct'].mean():.1f}% of capacity)")
+    print(f"  At 80% target : {tgt:>14,.0f} space-hours")
+    print(f"  Unsold vs tgt : {unsold:>14,.0f} space-hours "
+          f"({unsold / max(tgt, 1) * 100:.1f}% short)")
+    print()
+    print(f"  Revenue is reported per $1.00/hr of posted rate, since Seattle")
+    print(f"  publishes no per-meter rates. Multiply by the real posted rate:")
+    print(f"    e.g. at $2.00/hr → ${occ * 2:,.0f} earned, "
+          f"${unsold * 2:,.0f} foregone vs target")
+    print(f"Saved → {REVENUE_SUMMARY_FILE.name}, {REVENUE_DETAIL_FILE.name}")
+
+    return daily, area_hour
 
 
 if __name__ == "__main__":

@@ -1,6 +1,11 @@
 [
+  "blockfacename",
+  "paidparkingarea",
   "total_spaces",
-  "num_blockfaces",
+  "n_meters",
+  "time_limit",
+  "lat",
+  "lon",
   "temperature",
   "precipitation",
   "wind_speed",
