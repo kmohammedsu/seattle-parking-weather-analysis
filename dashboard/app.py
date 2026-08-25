@@ -941,7 +941,9 @@ elif page == "Map":
     if action_filter:
         view = view[view["primary_action"] == action_filter]
 
-    st.caption(f"Showing {len(view):,} of {len(geo):,} blockfaces")
+    st.caption(f"Showing {len(view):,} of {len(geo):,} blockfaces · "
+               "circles are individual blockfaces, numbered circles are groups — "
+               "zoom in to separate them")
 
     if view.empty:
         st.info("No blockfaces match those filters.")
@@ -949,10 +951,55 @@ elif page == "Map":
 
     m = folium.Map(
         location=[view["lat"].mean(), view["lon"].mean()],
-        zoom_start=13 if map_area != "All areas" else 12,
+        zoom_start=15 if map_area != "All areas" else 13,
         tiles="CartoDB positron", prefer_canvas=True,
     )
-    cluster = MarkerCluster(name="Blockfaces").add_to(m)
+    # Cluster colour must mean OCCUPANCY, not marker count. MarkerCluster's
+    # default green->orange->red ramp encodes how many markers are inside,
+    # which collides head-on with the occupancy palette used everywhere else
+    # (blue = under target, green = on target, red = over). A dense downtown
+    # cluster rendered red would read as "over capacity" when it is in fact
+    # mostly empty blocks. This colours each cluster by the dominant status of
+    # its children and shows the count as a label instead.
+    icon_create = f"""
+    function(cluster) {{
+        var counts = {{}};
+        cluster.getAllChildMarkers().forEach(function(mk) {{
+            var c = (mk.options && mk.options.fillColor) || '{ACCENT}';
+            counts[c] = (counts[c] || 0) + 1;
+        }});
+        var colour = '{ACCENT}', best = -1;
+        for (var c in counts) {{ if (counts[c] > best) {{ best = counts[c]; colour = c; }} }}
+        var n = cluster.getChildCount();
+        var size = n < 10 ? 34 : (n < 100 ? 42 : 50);
+        return new L.DivIcon({{
+            html: '<div style="background:' + colour + ';width:' + size + 'px;height:' + size
+                + 'px;line-height:' + size + 'px;border-radius:50%;color:#fff;'
+                + 'font-family:Source Sans 3,sans-serif;font-weight:700;'
+                + 'font-size:' + (n < 100 ? 13 : 12) + 'px;text-align:center;'
+                + 'border:2px solid rgba(255,255,255,0.9);'
+                + 'box-shadow:0 1px 4px rgba(15,23,42,0.4)">' + n + '</div>',
+            className: 'blockface-cluster',
+            iconSize: new L.Point(size, size)
+        }});
+    }}
+    """
+
+    cluster = MarkerCluster(
+        name="Blockfaces",
+        icon_create_function=icon_create,
+        options={
+            # Downtown packs hundreds of blockfaces into a few hundred metres;
+            # a tight radius breaks it into street-level groups instead of one blob.
+            "maxClusterRadius": 45,
+            # Past this zoom show every blockface individually — the whole point
+            # is reaching a specific block.
+            "disableClusteringAtZoom": 16,
+            "spiderfyOnMaxZoom": True,
+            # The coverage polygon covered half of downtown and obscured the map.
+            "showCoverageOnHover": False,
+        },
+    ).add_to(m)
 
     for _, r in view.iterrows():
         occ = r["avg_occupancy"]
