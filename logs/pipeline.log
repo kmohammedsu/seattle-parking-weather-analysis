@@ -676,3 +676,35 @@
 [2026-09-04 12:36:07] ------------------------------------------------------------
 [2026-09-04 12:36:07] Pipeline complete: 13/13 steps succeeded
 [2026-09-04 12:36:07] All steps complete.
+[2026-09-05 11:39:48] ============================================================
+[2026-09-05 11:39:48] Seattle Parking Intelligence — Pipeline Start
+[2026-09-05 11:39:48] ============================================================
+[2026-09-05 11:39:48] ▶ Build meter registry
+[2026-09-05 11:41:48]   ✓ Build meter registry done
+[2026-09-05 11:41:48] ▶ Fetch weather
+[2026-09-05 11:41:59]   ✓ Fetch weather done
+[2026-09-05 11:41:59] ▶ Process weather data
+[2026-09-05 11:44:51]   ✓ Process weather data done
+[2026-09-05 11:44:51] ▶ Fetch live parking
+[2026-09-05 11:45:51]   ✓ Fetch live parking done
+[2026-09-05 11:45:51] ▶ Fetch events
+[2026-09-05 11:45:52]   ✓ Fetch events done
+[2026-09-05 11:45:52] ▶ Fetch city permits
+[2026-09-05 11:45:53]   ✓ Fetch city permits done
+[2026-09-05 11:45:53] ▶ Fetch road closures
+[2026-09-05 11:45:54]   ✓ Fetch road closures done
+[2026-09-05 11:45:54] ▶ Build holiday calendar
+[2026-09-05 11:45:54]   ✓ Build holiday calendar done
+[2026-09-05 11:45:54] ▶ Aggregate features
+[2026-09-05 11:45:54]   ✓ Aggregate features done
+[2026-09-05 11:45:54] ▶ Train model
+[2026-09-05 11:45:55]   ✓ Train model done
+[2026-09-05 11:45:55] ▶ Per-meter pricing
+[2026-09-05 11:45:55]   ✓ Per-meter pricing done
+[2026-09-05 11:45:55] ▶ Utilization analysis
+[2026-09-05 11:45:55]   ✓ Utilization analysis done
+[2026-09-05 11:45:55] ▶ Infrastructure ROI
+[2026-09-05 11:45:55]   ✓ Infrastructure ROI done
+[2026-09-05 11:45:55] ------------------------------------------------------------
+[2026-09-05 11:45:55] Pipeline complete: 13/13 steps succeeded
+[2026-09-05 11:45:55] All steps complete.
